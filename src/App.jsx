@@ -10,6 +10,24 @@ fontLink.rel = "stylesheet";
 fontLink.href = "https://fonts.googleapis.com/css2?family=Fraunces:wght@600;700&family=DM+Sans:wght@300;400;500;600&display=swap";
 document.head.appendChild(fontLink);
 
+const styleEl = document.createElement("style");
+styleEl.textContent = `
+  * { box-sizing: border-box; }
+  @media (max-width: 700px) {
+    .sim-inputs { grid-template-columns: 1fr !important; }
+    .sim-destaques { grid-template-columns: 1fr !important; }
+    .sim-main { padding: 16px 12px !important; }
+    .sim-header { padding: 12px 16px !important; }
+    .sim-header-title { font-size: 17px !important; }
+    .sim-header-sub { font-size: 11px !important; }
+    .sim-hl-cols { flex-direction: column !important; }
+  }
+  .sim-number { transition: color 0.3s ease; }
+  .sim-card { transition: box-shadow 0.2s ease; }
+  .sim-card:hover { box-shadow: 0 4px 20px rgba(0,0,0,0.08) !important; }
+`;
+document.head.appendChild(styleEl);
+
 // ─── THEME ────────────────────────────────────────────────────────────────────
 const C = {
   bg:"#f7f9f7", panel:"#ffffff", border:"#e4ede4", borderMid:"#c8dcc8",
@@ -66,11 +84,22 @@ function calcPrice(principal,rM,trM,months) {
 
 // ─── CALC: CONSÓRCIO ──────────────────────────────────────────────────────────
 /**
- * Lógica original preservada + promoção pré-contemplação.
- * Promoção: reduz parcela pré por X%, o diferido é redistribuído igualmente
- * nas parcelas pré remanescentes (após promoMeses até cm).
- * O diferido não é reajustado — simplificação conservadora.
- * Resultado: total desembolsado maior que sem promoção.
+ * Sem promoção:
+ *   parcela(m) = parcelaBase × fatorIdx(m) — linha contínua
+ *
+ * Com promoção que encerra ANTES da contemplação (promoMeses < cm):
+ *   1..promoMeses: parcela reduzida
+ *   No mês promoMeses+1: recalcula saldo devedor (meias não pagas + restante)
+ *                        → salto para cima
+ *   promoMeses+1..cm: nova parcela recalculada × fatorIdx relativo
+ *   cm em diante: sem salto — já foi recalculado quando promo encerrou
+ *
+ * Com promoção até a contemplação (promoMeses >= cm):
+ *   1..cm: parcela reduzida
+ *   Na contemplação: recalcula saldo → salto para cima
+ *   cm+1 em diante: nova parcela × fatorIdx
+ *
+ * Com lance: saldo menor na contemplação → parcela pós menor → salto para baixo
  */
 function calcConsorcio(carta,months,adminPct,fundoReservaPct,idxM,cm,lance,promoDescPct=0,promoMeses=0) {
   if(carta<=0||months<=0) return {rows:[],totals:{},meta:{}};
@@ -80,70 +109,102 @@ function calcConsorcio(carta,months,adminPct,fundoReservaPct,idxM,cm,lance,promo
   const grossTotal=carta*(1+adminPct+fundoReservaPct);
   const parcelaBase=grossTotal/months;
   const adminCost=carta*adminPct;
-
-  // Promoção só pré-contemplação
-  const promoM=Math.min(Math.max(Math.round(promoMeses)||0,0), Math.max(cm-1,0));
+  const promoM=Math.min(Math.max(Math.round(promoMeses)||0,0),months-1);
   const promoD=Math.max(promoDescPct||0,0);
-
-  // Carta travada e saldo pós (lógica original)
   const fatorCm=(1+idxM)**(cm-1);
   const cartaTravada=carta*fatorCm;
-  const grossAtual=grossTotal*fatorCm;
-  const paidCm=parcelaBase*fatorCm*cm;
-  const saldoBruto=Math.max(grossAtual-paidCm,0);
-  const lanceEfetivo=Math.min(lanceSafe,saldoBruto);
-  const saldoPos=Math.max(saldoBruto-lanceEfetivo,0);
-  const mesesPos=months-cm;
-  const parcelaPosBase=mesesPos>0?saldoPos/mesesPos:0;
 
-  // Calcula total diferido corrigido pelo indexador
-  // Cada valor diferido no mês m cresce pelo indexador até o fim da promoção
-  // Isso faz o total desembolsado ser maior que sem promoção
-  let totalDiferido=0;
-  for(let m=1;m<=promoM;m++){
-    const parcCheia=parcelaBase*(1+idxM)**(m-1);
-    const diferidoMes=parcCheia*promoD;
-    // Cresce pelo indexador do mês m até o mês promoM
-    totalDiferido+=diferidoMes*(1+idxM)**(promoM-m);
+  // Momento do recálculo:
+  // - promoM < cm: recalcula no mês promoM+1
+  // - promoM >= cm: recalcula na contemplação (cm)
+  const recalcMes=promoD>0?(promoM<cm?promoM+1:cm):null;
+
+  // Simula saldo devedor mês a mês para encontrar saldo no momento do recálculo
+  let saldoNoRecalc=0;
+  if(recalcMes!==null){
+    let s=grossTotal;
+    for(let m=1;m<recalcMes;m++){
+      s=s*(1+idxM);
+      const p=parcelaBase*(1+idxM)**(m-1);
+      s=Math.max(s-p*( m<=promoM?( 1-promoD):1),0);
+    }
+    // Atualiza pelo indexador do mês do recálculo
+    s=s*(1+idxM);
+    saldoNoRecalc=s;
   }
 
-  // Redistribuído igualmente nas parcelas pré remanescentes (promoM+1 até cm)
-  const mesesRestantesPre=Math.max(cm-promoM,0);
-  const acrescimoPre=mesesRestantesPre>0?totalDiferido/mesesRestantesPre:0;
+  // Parcela recalculada no momento do recálculo
+  // meses restantes a partir do recalcMes
+  const mesesAposRecalc=recalcMes!==null?months-recalcMes+1:0;
+  const parcelaRecalcBase=recalcMes!==null&&mesesAposRecalc>0
+    ?saldoNoRecalc/mesesAposRecalc
+    :0;
+
+  // Lance efetivo — calculado sobre saldo na contemplação
+  let saldoNaCm=0;
+  if(recalcMes!==null&&promoM>=cm){
+    // promoção até contemplação: saldo na contemplação = saldoNoRecalc
+    saldoNaCm=saldoNoRecalc;
+  } else if(recalcMes!==null&&promoM<cm){
+    // recálculo antes de cm: saldo na contemplação = parcelaRecalcBase × meses restantes
+    const mesesAteContemplacao=cm-recalcMes;
+    // saldo = parcelaRecalcBase × (meses após recálculo - meses já pagos após recálculo)
+    // simplificação: saldo = parcelaRecalcBase × (months - cm)
+    saldoNaCm=parcelaRecalcBase*(months-cm);
+  } else {
+    // sem promoção: lógica original
+    saldoNaCm=Math.max(grossTotal*fatorCm-parcelaBase*fatorCm*cm,0);
+  }
+  const lanceEfetivo=Math.min(lanceSafe,saldoNaCm);
+  const saldoPos=Math.max(saldoNaCm-lanceEfetivo,0);
+  const mesesPos=months-cm;
+
+  // Base pós-contemplação
+  // Com lance: recalcula sobre saldo menor
+  // Sem lance: continua da parcela recalculada (ou linha original se sem promoção)
+  let parcelaPosBase;
+  if(lanceSafe>0&&mesesPos>0){
+    parcelaPosBase=saldoPos/mesesPos;
+  } else if(promoD>0){
+    // continua da parcelaRecalcBase reajustada até cm
+    const mesesDesdeRecalc=cm-recalcMes;
+    parcelaPosBase=parcelaRecalcBase*(1+idxM)**mesesDesdeRecalc;
+  } else {
+    parcelaPosBase=parcelaBase*(1+idxM)**(cm-1);
+  }
 
   let idxPre=0,idxPos=0,cumInstall=0;
 
   const rows=Array.from({length:months},(_,i)=>{
     const m=i+1;
-    let parcelaBase_m, idxAdj, installment;
+    let installment,parcelaBase_m,idxAdj;
 
     if(m<=cm){
-      // Parcela base com indexador (lógica original)
-      parcelaBase_m=parcelaBase*(1+idxM)**(m-1);
-      idxAdj=parcelaBase_m-parcelaBase;
-      idxPre+=Math.max(idxAdj,0);
-
-      if(promoD>0&&m<=promoM){
-        // Mês promocional: desconto
+      if(promoD>0&&m<recalcMes){
+        // Parcela reduzida (período promocional)
+        parcelaBase_m=parcelaBase*(1+idxM)**(m-1);
         installment=parcelaBase_m*(1-promoD);
-      } else if(promoD>0&&m>promoM&&mesesRestantesPre>0){
-        // Pós-promo até cm: acréscimo para recuperar diferido
-        installment=parcelaBase_m+acrescimoPre;
+      } else if(promoD>0&&m>=recalcMes){
+        // Pós-recálculo: parcelaRecalcBase × fatorIdx relativo ao recalcMes
+        parcelaBase_m=parcelaRecalcBase*(1+idxM)**(m-recalcMes);
+        installment=parcelaBase_m;
       } else {
+        // Sem promoção
+        parcelaBase_m=parcelaBase*(1+idxM)**(m-1);
         installment=parcelaBase_m;
       }
+      idxAdj=Math.max(parcelaBase_m-parcelaBase,0);
+      idxPre+=idxAdj;
     } else {
-      // Pós-contemplação: lógica original
-      const fRel=(1+idxM)**(m-cm);
-      parcelaBase_m=parcelaPosBase*fRel;
-      idxAdj=parcelaBase_m-parcelaPosBase;
-      idxPos+=Math.max(idxAdj,0);
+      // Pós-contemplação
+      parcelaBase_m=parcelaPosBase*(1+idxM)**(m-cm);
+      idxAdj=Math.max(parcelaBase_m-parcelaPosBase,0);
+      idxPos+=idxAdj;
       installment=parcelaBase_m;
     }
 
     if(m===cm) cumInstall+=lanceEfetivo;
     cumInstall+=installment;
-
     return {month:m,installment,installmentBase:parcelaBase_m,idxAdj,cumInstall,isPos:m>cm};
   });
 
@@ -168,14 +229,14 @@ function calcConsorcio(carta,months,adminPct,fundoReservaPct,idxM,cm,lance,promo
 }
 
 // ─── INPUTS ───────────────────────────────────────────────────────────────────
-const iBase={width:"100%",marginTop:5,padding:"11px 14px",border:`1.5px solid ${C.border}`,borderRadius:10,fontSize:14,background:"#fff",boxSizing:"border-box",color:C.text,outline:"none",fontFamily:F.body,transition:"border-color 0.15s"};
+const iBase={width:"100%",marginTop:5,padding:"12px 14px",border:`1.5px solid ${C.border}`,borderRadius:10,fontSize:15,background:"#fff",boxSizing:"border-box",color:C.text,outline:"none",fontFamily:F.body,transition:"border-color 0.15s"};
 
 function InputMoney({label,value,onChange,hint}) {
   const [d,setD]=useState(fmtCurrency(value));
   useEffect(()=>{setD(fmtCurrency(value));},[value]);
   return (
     <label style={{display:"block",fontFamily:F.body}}>
-      <div style={{fontSize:11,fontWeight:600,color:C.muted,marginBottom:3,textTransform:"uppercase",letterSpacing:"0.07em"}}>{label}</div>
+      <div style={{fontSize:12,fontWeight:600,color:C.muted,marginBottom:4,textTransform:"uppercase",letterSpacing:"0.07em"}}>{label}</div>
       <input type="text" inputMode="numeric" value={d}
         onChange={e=>{const n=parseDigits(e.target.value);setD(fmtCurrency(n));onChange(n);}}
         onFocus={e=>e.target.style.borderColor=C.accent} onBlur={e=>e.target.style.borderColor=C.border}
@@ -187,7 +248,7 @@ function InputMoney({label,value,onChange,hint}) {
 function InputPct({label,value,onChange,hint}) {
   return (
     <label style={{display:"block",fontFamily:F.body}}>
-      <div style={{fontSize:11,fontWeight:600,color:C.muted,marginBottom:3,textTransform:"uppercase",letterSpacing:"0.07em"}}>{label}</div>
+      <div style={{fontSize:12,fontWeight:600,color:C.muted,marginBottom:4,textTransform:"uppercase",letterSpacing:"0.07em"}}>{label}</div>
       <div style={{position:"relative"}}>
         <input
           type="number"
@@ -206,7 +267,7 @@ function InputPct({label,value,onChange,hint}) {
 function InputInt({label,value,onChange,hint}) {
   return (
     <label style={{display:"block",fontFamily:F.body}}>
-      <div style={{fontSize:11,fontWeight:600,color:C.muted,marginBottom:3,textTransform:"uppercase",letterSpacing:"0.07em"}}>{label}</div>
+      <div style={{fontSize:12,fontWeight:600,color:C.muted,marginBottom:4,textTransform:"uppercase",letterSpacing:"0.07em"}}>{label}</div>
       <input type="number" value={value}
         onChange={e=>onChange(Number(e.target.value))}
         onFocus={e=>e.target.style.borderColor=C.accent} onBlur={e=>e.target.style.borderColor=C.border}
@@ -217,14 +278,13 @@ function InputInt({label,value,onChange,hint}) {
 }
 
 // ─── UI ───────────────────────────────────────────────────────────────────────
-function InputPanel({accentColor,label,icon,children}) {
+function InputPanel({accentColor,label,children}) {
   return (
     <div style={{background:C.panel,borderRadius:16,border:`1px solid ${C.border}`,boxShadow:"0 2px 12px rgba(0,0,0,0.04)",overflow:"hidden"}}>
-      <div style={{background:accentColor,padding:"14px 20px",display:"flex",alignItems:"center",gap:10}}>
-        <span style={{fontSize:20}}>{icon}</span>
-        <span style={{fontFamily:F.display,fontSize:17,fontWeight:700,color:"#fff"}}>{label}</span>
+      <div style={{background:accentColor,padding:"14px 22px"}}>
+        <span style={{fontFamily:F.display,fontSize:18,fontWeight:700,color:"#fff",letterSpacing:"-0.01em"}}>{label}</span>
       </div>
-      <div style={{padding:20,display:"flex",flexDirection:"column",gap:14}}>{children}</div>
+      <div style={{padding:22,display:"flex",flexDirection:"column",gap:16}}>{children}</div>
     </div>
   );
 }
@@ -247,12 +307,12 @@ function Row({label,sub,sac,price,cons,hlMin,even}) {
   };
   return (
     <tr style={{background:even?"#fafcfa":"#fff"}}>
-      <td style={{padding:"11px 18px",fontSize:13,color:C.text,borderBottom:`1px solid ${C.border}`,fontFamily:F.body,width:"34%"}}>
+      <td style={{padding:"13px 18px",fontSize:14,color:C.text,borderBottom:`1px solid ${C.border}`,fontFamily:F.body,width:"34%"}}>
         <div style={{fontWeight:500}}>{label}</div>
         {sub&&<div style={{fontSize:11,color:C.muted,marginTop:2,lineHeight:1.4}}>{sub}</div>}
       </td>
       {vals.map((item,i)=>(
-        <td key={i} style={{padding:"11px 18px",fontSize:13,textAlign:"center",borderBottom:`1px solid ${C.border}`,background:hlMin&&item.v===minVal?C.accentHl:"transparent",whiteSpace:"nowrap",fontFamily:F.body}}>
+        <td key={i} style={{padding:"13px 18px",fontSize:14,textAlign:"center",borderBottom:`1px solid ${C.border}`,background:hlMin&&item.v===minVal?C.accentHl:"transparent",whiteSpace:"nowrap",fontFamily:F.body}}>
           {renderVal(item)}
         </td>
       ))}
@@ -263,7 +323,7 @@ function Row({label,sub,sac,price,cons,hlMin,even}) {
 function ChartCard({title,subtitle,children}) {
   return (
     <div style={{background:C.panel,border:`1px solid ${C.border}`,borderRadius:16,padding:"22px 22px 14px",boxShadow:"0 2px 12px rgba(0,0,0,0.04)",marginBottom:16}}>
-      <div style={{fontFamily:F.display,fontSize:17,fontWeight:700,color:C.text,marginBottom:2}}>{title}</div>
+      <div style={{fontFamily:F.display,fontSize:19,fontWeight:700,color:C.text,marginBottom:4}}>{title}</div>
       {subtitle&&<div style={{fontSize:12,color:C.muted,marginBottom:16,fontFamily:F.body,lineHeight:1.5}}>{subtitle}</div>}
       <div style={{width:"100%",height:300}}>{children}</div>
     </div>
@@ -371,19 +431,19 @@ export default function App() {
     <div style={{background:C.bg,minHeight:"100vh",fontFamily:F.body}}>
 
       {/* HEADER */}
-      <div style={{background:"#fff",borderBottom:`1px solid ${C.border}`,padding:"16px 32px",display:"flex",alignItems:"center",gap:14,position:"sticky",top:0,zIndex:100,boxShadow:"0 1px 8px rgba(0,0,0,0.05)"}}>
-        <div style={{width:40,height:40,borderRadius:12,background:C.accent,display:"flex",alignItems:"center",justifyContent:"center",fontSize:20,flexShrink:0}}>🏡</div>
+      <div style={{background:"#fff",borderBottom:`1px solid ${C.border}`,padding:"16px 32px",display:"flex",alignItems:"center",gap:16,position:"sticky",top:0,zIndex:100,boxShadow:"0 1px 8px rgba(0,0,0,0.05)"}}>
+        <div style={{width:6,height:36,borderRadius:3,background:C.accent,flexShrink:0}}/>
         <div>
-          <div style={{fontFamily:F.display,fontSize:20,fontWeight:700,color:C.text,lineHeight:1.1}}>Simulador Imobiliário</div>
-          <div style={{fontSize:12,color:C.muted,marginTop:2}}>SAC · Price · Consórcio — comparativo de custo total</div>
+          <div style={{fontFamily:F.display,fontSize:22,fontWeight:700,color:C.text,lineHeight:1.1}}>Simulador de Financiamento Imobiliário</div>
+          <div style={{fontSize:13,color:C.muted,marginTop:3}}>Comparativo entre SAC, Price e Consórcio — custo total ao final do prazo</div>
         </div>
       </div>
 
-      <div style={{maxWidth:1100,margin:"0 auto",padding:"28px 20px"}}>
+      <div className="sim-main" style={{maxWidth:1100,margin:"0 auto",padding:"28px 20px"}}>
 
         {/* INPUTS */}
-        <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:16,marginBottom:24}}>
-          <InputPanel accentColor={C.sac} label="Financiamento" icon="🏦">
+        <div className="sim-inputs" style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:16,marginBottom:24}}>
+          <InputPanel accentColor={C.sac} label="Financiamento Imobiliário (SAC e Price)">
             <InputMoney label="Valor do imóvel"  value={imovel}  onChange={setImovel}/>
             <InputMoney label="Entrada"          value={entrada} onChange={setEntrada}/>
             <InputMoney label="FGTS"             value={fgts}    onChange={setFgts} hint="Opcional · reduz o principal financiado"/>
@@ -391,7 +451,7 @@ export default function App() {
             <InputPct   label="TR anual"         value={trAnual} onChange={setTrAnual}/>
             <InputInt   label="Prazo (meses)"    value={prazoFin} onChange={setPrazoFin}/>
           </InputPanel>
-          <InputPanel accentColor={C.cons} label="Consórcio" icon="🤝">
+          <InputPanel accentColor={C.cons} label="Consórcio Imobiliário">
             <InputMoney label="Carta de crédito"         value={carta}     onChange={setCarta}/>
             <InputPct   label="Taxa de administração"    value={admin}     onChange={setAdmin}/>
             <InputPct   label="Fundo de reserva"         value={fundo}     onChange={setFundo} hint="Típico 2%–4% · tratado como custo"/>
@@ -413,12 +473,32 @@ export default function App() {
           </InputPanel>
         </div>
 
+        {/* RESUMO EXECUTIVO */}
+        {(()=>{
+          const menorTotal=Math.min(sacTotal,priceTotal,consTotal);
+          const melhor=sacTotal===menorTotal?"SAC":priceTotal===menorTotal?"Price":"Consórcio";
+          const difConsFinanc=Math.abs(consTotal-Math.min(sacTotal,priceTotal));
+          const melhorFin=sacTotal<=priceTotal?"SAC":"Price";
+          const cartaVsImovel=ct.cartaTravada>0?ct.cartaTravada-imovel:0;
+          return (
+            <div style={{background:`linear-gradient(135deg, ${C.accentBg} 0%, #fff 100%)`,border:`1.5px solid ${C.accent}`,borderRadius:16,padding:"20px 24px",marginBottom:20,boxShadow:"0 2px 12px rgba(45,158,80,0.08)"}}>
+              <div style={{fontSize:11,fontWeight:700,color:C.accent,textTransform:"uppercase",letterSpacing:"0.09em",marginBottom:12,fontFamily:F.body}}>Resumo da simulação</div>
+              <div style={{fontSize:16,color:C.text,fontFamily:F.body,lineHeight:1.8}}>
+                {melhor==="Consórcio"
+                  ? <>O <strong>consórcio</strong> tem o menor desembolso total ({brl(consTotal)}), <strong>{brl(difConsFinanc)} a menos</strong> que o {melhorFin}. Porém você acessa o imóvel apenas no <strong>mês {cmSafe}</strong> e recebe uma carta de <strong>{brl(ct.cartaTravada)}</strong> — {cartaVsImovel>0?<>{brl(cartaVsImovel)} acima do valor atual do imóvel, reajustada pelo indexador.</>:<>abaixo do valor atual do imóvel.</>}</>
+                  : <>O <strong>{melhor}</strong> tem o menor desembolso total ({brl(menorTotal)}). O consórcio custaria <strong>{brl(difConsFinanc)} a mais</strong>, mas entrega uma carta de <strong>{brl(ct.cartaTravada)}</strong> na contemplação (mês {cmSafe}), {cartaVsImovel>0?<><strong>{brl(cartaVsImovel)} acima</strong> do valor atual do imóvel.</>:<>abaixo do valor atual do imóvel.</>} No financiamento você tem o imóvel <strong>imediatamente</strong>.</>
+                }
+              </div>
+            </div>
+          );
+        })()}
+
         {/* DESTAQUES */}
-        <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:16,marginBottom:24}}>
+        <div className="sim-destaques" style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:16,marginBottom:24}}>
           {[{title:"Total desembolsado",list:totaisList,min:minT,fmt:(v)=>brl(v)}].map((card,ci)=>(
             <div key={ci} style={{background:C.panel,border:`1px solid ${C.border}`,borderRadius:16,padding:20,boxShadow:"0 2px 12px rgba(0,0,0,0.04)"}}>
               <div style={{fontSize:11,fontWeight:700,color:C.muted,textTransform:"uppercase",letterSpacing:"0.08em",marginBottom:14,fontFamily:F.body}}>{card.title}</div>
-              <div style={{display:"flex",gap:10}}>
+              <div className="sim-hl-cols" style={{display:"flex",gap:10}}>
                 {card.list.map((t,i)=>(
                   <div key={i} style={{flex:1,borderRadius:12,padding:"14px 10px",textAlign:"center",background:t.value===card.min?C.accentBg:"#fafcfa",border:`1.5px solid ${t.value===card.min?C.accent:C.border}`}}>
                     <div style={{fontSize:11,fontWeight:700,color:t.color,marginBottom:6,textTransform:"uppercase",letterSpacing:"0.06em",fontFamily:F.body}}>{t.label}</div>
