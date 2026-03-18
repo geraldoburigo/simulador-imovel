@@ -65,12 +65,27 @@ function calcPrice(principal,rM,trM,months) {
 }
 
 // ─── CALC: CONSÓRCIO ──────────────────────────────────────────────────────────
-function calcConsorcio(carta,months,adminPct,fundoReservaPct,idxM,cm,lance) {
+/**
+ * Lógica original preservada + promoção pré-contemplação.
+ * Promoção: reduz parcela pré por X%, o diferido é redistribuído igualmente
+ * nas parcelas pré remanescentes (após promoMeses até cm).
+ * O diferido não é reajustado — simplificação conservadora.
+ * Resultado: total desembolsado maior que sem promoção.
+ */
+function calcConsorcio(carta,months,adminPct,fundoReservaPct,idxM,cm,lance,promoDescPct=0,promoMeses=0) {
   if(carta<=0||months<=0) return {rows:[],totals:{},meta:{}};
+
   const lanceSafe=Math.max(Number(lance)||0,0);
   const fundoCost=carta*fundoReservaPct;
   const grossTotal=carta*(1+adminPct+fundoReservaPct);
   const parcelaBase=grossTotal/months;
+  const adminCost=carta*adminPct;
+
+  // Promoção só pré-contemplação
+  const promoM=Math.min(Math.max(Math.round(promoMeses)||0,0), Math.max(cm-1,0));
+  const promoD=Math.max(promoDescPct||0,0);
+
+  // Carta travada e saldo pós (lógica original)
   const fatorCm=(1+idxM)**(cm-1);
   const cartaTravada=carta*fatorCm;
   const grossAtual=grossTotal*fatorCm;
@@ -80,18 +95,76 @@ function calcConsorcio(carta,months,adminPct,fundoReservaPct,idxM,cm,lance) {
   const saldoPos=Math.max(saldoBruto-lanceEfetivo,0);
   const mesesPos=months-cm;
   const parcelaPosBase=mesesPos>0?saldoPos/mesesPos:0;
-  const adminCost=carta*adminPct;
+
+  // Calcula total diferido corrigido pelo indexador
+  // Cada valor diferido no mês m cresce pelo indexador até o fim da promoção
+  // Isso faz o total desembolsado ser maior que sem promoção
+  let totalDiferido=0;
+  for(let m=1;m<=promoM;m++){
+    const parcCheia=parcelaBase*(1+idxM)**(m-1);
+    const diferidoMes=parcCheia*promoD;
+    // Cresce pelo indexador do mês m até o mês promoM
+    totalDiferido+=diferidoMes*(1+idxM)**(promoM-m);
+  }
+
+  // Redistribuído igualmente nas parcelas pré remanescentes (promoM+1 até cm)
+  const mesesRestantesPre=Math.max(cm-promoM,0);
+  const acrescimoPre=mesesRestantesPre>0?totalDiferido/mesesRestantesPre:0;
+
   let idxPre=0,idxPos=0,cumInstall=0;
+
   const rows=Array.from({length:months},(_,i)=>{
-    const m=i+1; let installment,idxAdj;
-    if(m<=cm){ installment=parcelaBase*(1+idxM)**(m-1); idxAdj=installment-parcelaBase; idxPre+=idxAdj; }
-    else { const fRel=(1+idxM)**(m-cm); installment=parcelaPosBase*fRel; idxAdj=installment-parcelaPosBase; idxPos+=idxAdj; }
+    const m=i+1;
+    let parcelaBase_m, idxAdj, installment;
+
+    if(m<=cm){
+      // Parcela base com indexador (lógica original)
+      parcelaBase_m=parcelaBase*(1+idxM)**(m-1);
+      idxAdj=parcelaBase_m-parcelaBase;
+      idxPre+=Math.max(idxAdj,0);
+
+      if(promoD>0&&m<=promoM){
+        // Mês promocional: desconto
+        installment=parcelaBase_m*(1-promoD);
+      } else if(promoD>0&&m>promoM&&mesesRestantesPre>0){
+        // Pós-promo até cm: acréscimo para recuperar diferido
+        installment=parcelaBase_m+acrescimoPre;
+      } else {
+        installment=parcelaBase_m;
+      }
+    } else {
+      // Pós-contemplação: lógica original
+      const fRel=(1+idxM)**(m-cm);
+      parcelaBase_m=parcelaPosBase*fRel;
+      idxAdj=parcelaBase_m-parcelaPosBase;
+      idxPos+=Math.max(idxAdj,0);
+      installment=parcelaBase_m;
+    }
+
     if(m===cm) cumInstall+=lanceEfetivo;
     cumInstall+=installment;
-    return {month:m,installment,idxAdj,cumInstall,isPos:m>cm};
+
+    return {month:m,installment,installmentBase:parcelaBase_m,idxAdj,cumInstall,isPos:m>cm};
   });
+
   const last=rows[rows.length-1];
-  return {rows,totals:{installFirst:rows[0].installment,installLast:last.installment,totalAdm:adminCost,totalFundo:fundoCost,totalIdxPre:idxPre,totalIdxPos:idxPos,totalPaid:last.cumInstall,totalAmort:cartaTravada,cartaTravada,lanceEfetivo},meta:{cartaTravada,lanceEfetivo,adminCost,fundoCost,idxPre,idxPos,cm}};
+
+  return {
+    rows,
+    totals:{
+      installFirst:rows[0]?.installment||0,
+      installLast:last?.installment||0,
+      totalAdm:adminCost,
+      totalFundo:fundoCost,
+      totalIdxPre:idxPre,
+      totalIdxPos:idxPos,
+      totalPaid:last?.cumInstall||0,
+      totalAmort:cartaTravada,
+      cartaTravada,
+      lanceEfetivo,
+    },
+    meta:{cartaTravada,lanceEfetivo,adminCost,fundoCost,idxPre,idxPos,cm,promoDescPct:promoD,promoMeses:promoM},
+  };
 }
 
 // ─── INPUTS ───────────────────────────────────────────────────────────────────
@@ -227,6 +300,8 @@ export default function App() {
   const [cmMes,setCmMes]=useState(80);
   const [lance,setLance]=useState(0);
   const [aluguel,setAluguel]=useState(0);
+  const [promoDesc,setPromoDesc]=useState(0);
+  const [promoMeses,setPromoMeses]=useState(0);
 
   const rM=useMemo(()=>annualToMonthly(juros),[juros]);
   const trM=useMemo(()=>annualToMonthly(trAnual),[trAnual]);
@@ -236,7 +311,7 @@ export default function App() {
 
   const sac=useMemo(()=>calcSac(principal,rM,trM,prazoFin),[principal,rM,trM,prazoFin]);
   const price=useMemo(()=>calcPrice(principal,rM,trM,prazoFin),[principal,rM,trM,prazoFin]);
-  const cons=useMemo(()=>calcConsorcio(carta,prazoCons,admin/100,fundo/100,idxM,cmSafe,lance),[carta,prazoCons,admin,fundo,idxM,cmSafe,lance]);
+  const cons=useMemo(()=>calcConsorcio(carta,prazoCons,admin/100,fundo/100,idxM,cmSafe,lance,promoDesc/100,promoMeses),[carta,prazoCons,admin,fundo,idxM,cmSafe,lance,promoDesc,promoMeses]);
 
   const st=sac.totals,pt=price.totals,ct=cons.totals;
   const aluguelMensal=Number(aluguel)||0;
@@ -274,24 +349,23 @@ export default function App() {
   // Cenários de contemplação
   const cenariosMeses = [40, 80, 120, 160].filter(m => m <= prazoCons);
   const cenarios = useMemo(() => cenariosMeses.map(cm => {
-    const c = calcConsorcio(carta, prazoCons, admin/100, fundo/100, idxM, cm, lance);
+    const c = calcConsorcio(carta, prazoCons, admin/100, fundo/100, idxM, cm, lance, promoDesc/100, promoMeses);
     const ct2 = c.totals;
-    const custo = (ct2.totalAdm||0)+(ct2.totalFundo||0)+(ct2.totalIdxPre||0)+(ct2.totalIdxPos||0);
-    const custoPct = ct2.cartaTravada > 0 ? (custo/ct2.cartaTravada)*100 : 0;
-    return { cm, cartaTravada: ct2.cartaTravada, idxPos: ct2.totalIdxPos, custoPct, totalPaid: ct2.totalPaid };
-  }), [carta, prazoCons, admin, fundo, idxM, lance, cenariosMeses.join()]);
-
-  const sacCusto=(st.totalInterest||0)+(st.totalTR||0);
-  const priceCusto=(pt.totalInterest||0)+(pt.totalTR||0);
-  const consCusto=(ct.totalAdm||0)+(ct.totalFundo||0)+(ct.totalIdxPre||0)+(ct.totalIdxPos||0);
-  const sacPct=principal>0?(sacCusto/principal)*100:0;
-  const pricePct=principal>0?(priceCusto/principal)*100:0;
-  const consPct=ct.cartaTravada>0?(consCusto/ct.cartaTravada)*100:0;
+    const desembolsoPreCm = c.rows.slice(0, cm).reduce((a, r) => a + r.installment, 0)
+      + (ct2.lanceEfetivo || 0);
+    return {
+      cm,
+      cartaTravada: ct2.cartaTravada,
+      idxPre: ct2.totalIdxPre,
+      idxPos: ct2.totalIdxPos,
+      desembolsoPre: desembolsoPreCm,
+      desembolsoPos: Math.max((ct2.totalPaid || 0) - desembolsoPreCm + (ct2.lanceEfetivo||0), 0),
+      totalPaid: ct2.totalPaid,
+    };
+  }), [carta, prazoCons, admin, fundo, idxM, lance, promoDesc, promoMeses, cenariosMeses.join()]);
 
   const totaisList=[{label:"SAC",value:sacTotal,color:C.sac},{label:"Price",value:priceTotal,color:C.price},{label:"Consórcio",value:consTotal,color:C.cons}];
-  const custosList=[{label:"SAC",value:sacPct,color:C.sac},{label:"Price",value:pricePct,color:C.price},{label:"Consórcio",value:consPct,color:C.cons}];
   const minT=Math.min(...totaisList.map(t=>t.value));
-  const minC=Math.min(...custosList.map(c=>c.value));
 
   return (
     <div style={{background:C.bg,minHeight:"100vh",fontFamily:F.body}}>
@@ -326,8 +400,37 @@ export default function App() {
             <InputInt   label="Mês de contemplação"      value={cmMes}     onChange={setCmMes} hint="Estimativa — sem garantia de data"/>
             <InputMoney label="Lance próprio"            value={lance}     onChange={setLance} hint="Abate o saldo devedor na contemplação"/>
             <InputMoney label="Aluguel mensal na espera" value={aluguel}   onChange={setAluguel} hint={aluguel>0?`Reajustado pelo indexador · total: ${brl(aluguelTotal)}`:"Opcional · deixe zero para ignorar"}/>
+            <div style={{borderTop:`1px solid ${C.border}`,paddingTop:12,marginTop:2}}>
+              <div style={{fontSize:11,fontWeight:700,color:C.muted,textTransform:"uppercase",letterSpacing:"0.07em",marginBottom:10}}>Promoção de entrada</div>
+              <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10}}>
+                <InputPct  label="Desconto na parcela" value={promoDesc}  onChange={setPromoDesc}  hint="Ex: 30 = 30% de desconto"/>
+                <InputInt  label="Duração (meses)"     value={promoMeses} onChange={setPromoMeses} hint="Meses com desconto"/>
+              </div>
+              {promoDesc>0&&promoMeses>0&&<div style={{fontSize:11,color:C.muted,marginTop:8,background:C.soft,borderRadius:8,padding:"8px 10px",lineHeight:1.6}}>
+                Parcela inicial: <strong style={{color:C.cons}}>{brl(cons.totals?.installFirst||0)}</strong> (com desconto) · sem desconto seria <strong>{brl((cons.totals?.installFirst||0)/(1-promoDesc/100))}</strong>
+              </div>}
+            </div>
           </InputPanel>
         </div>
+
+        {/* DESTAQUES */}
+        <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:16,marginBottom:24}}>
+          {[{title:"Total desembolsado",list:totaisList,min:minT,fmt:(v)=>brl(v)}].map((card,ci)=>(
+            <div key={ci} style={{background:C.panel,border:`1px solid ${C.border}`,borderRadius:16,padding:20,boxShadow:"0 2px 12px rgba(0,0,0,0.04)"}}>
+              <div style={{fontSize:11,fontWeight:700,color:C.muted,textTransform:"uppercase",letterSpacing:"0.08em",marginBottom:14,fontFamily:F.body}}>{card.title}</div>
+              <div style={{display:"flex",gap:10}}>
+                {card.list.map((t,i)=>(
+                  <div key={i} style={{flex:1,borderRadius:12,padding:"14px 10px",textAlign:"center",background:t.value===card.min?C.accentBg:"#fafcfa",border:`1.5px solid ${t.value===card.min?C.accent:C.border}`}}>
+                    <div style={{fontSize:11,fontWeight:700,color:t.color,marginBottom:6,textTransform:"uppercase",letterSpacing:"0.06em",fontFamily:F.body}}>{t.label}</div>
+                    <div style={{fontSize:18,fontWeight:700,color:t.value===card.min?C.accent:C.text,fontFamily:F.display,lineHeight:1.1}}>{card.fmt(t.value)}</div>
+                    {t.value===card.min&&<div style={{fontSize:10,color:C.accent,marginTop:5,fontWeight:700}}>✓ menor</div>}
+                  </div>
+                ))}
+              </div>
+            </div>
+          ))}
+        </div>
+
 
         {/* CENÁRIOS DE CONTEMPLAÇÃO */}
         <div style={{background:C.panel,border:`1px solid ${C.border}`,borderRadius:16,boxShadow:"0 2px 12px rgba(0,0,0,0.04)",marginBottom:20,overflow:"hidden"}}>
@@ -351,26 +454,55 @@ export default function App() {
               </thead>
               <tbody>
                 {[
-                  {label:"Carta reajustada",sub:"Valor do crédito recebido",fn:c=>brl(c.cartaTravada)},
-                  {label:"Idx pós-contemplação",sub:"Custo puro sem contrapartida",fn:c=>brl(c.idxPos)},
-                  {label:"Custo % da carta",sub:"Quanto você paga pelo crédito",fn:c=>`${c.custoPct.toFixed(1)}%`,hlMin:true},
-                  {label:"Total desembolsado",sub:"Parcelas + lance",fn:c=>brl(c.totalPaid),hlMin:true},
+                  {
+                    label:"Carta reajustada",
+                    sub:"Valor do crédito recebido na contemplação",
+                    fn:c=>brl(c.cartaTravada),
+                    numFn:null,
+                  },
+                  {
+                    label:"Desembolso até a contemplação",
+                    sub:"Parcelas reajustadas · inclui carta + adm + fundo de reserva",
+                    fn:c=>brl(c.desembolsoPre),
+                    numFn:c=>c.desembolsoPre,
+                    hlMin:true,
+                  },
+                  {
+                    label:"Desembolso pós-contemplação",
+                    sub:"Parcelas reajustadas sobre o saldo devedor remanescente",
+                    fn:c=>brl(c.desembolsoPos),
+                    numFn:c=>c.desembolsoPos,
+                    hlMin:true,
+                  },
+                  {
+                    label:"Total desembolsado",
+                    sub:"Soma dos dois períodos + lance",
+                    fn:c=>brl(c.totalPaid),
+                    numFn:c=>c.totalPaid,
+                    hlMin:true,
+                    bold:true,
+                  },
                 ].map((row,ri)=>{
                   const vals=cenarios.map(c=>row.fn(c));
-                  const numVals=cenarios.map(c=>row.label.includes("%")?c.custoPct:row.label.includes("Total")?c.totalPaid:null);
-                  const minV=row.hlMin?Math.min(...numVals.filter(v=>v!==null)):null;
+                  const numVals=row.numFn?cenarios.map(c=>row.numFn(c)):[];
+                  const minV=row.hlMin&&numVals.length?Math.min(...numVals):null;
                   return (
                     <tr key={ri} style={{background:ri%2===0?"#fff":"#fafcfa"}}>
                       <td style={{padding:"11px 16px",fontSize:13,color:C.text,borderBottom:`1px solid ${C.border}`,fontFamily:F.body}}>
-                        <div style={{fontWeight:500}}>{row.label}</div>
+                        <div style={{fontWeight:row.bold?700:500}}>{row.label}</div>
                         {row.sub&&<div style={{fontSize:11,color:C.muted,marginTop:1}}>{row.sub}</div>}
                       </td>
                       {cenarios.map((c,ci)=>{
-                        const numVal=row.label.includes("%")?c.custoPct:row.label.includes("Total")?c.totalPaid:null;
-                        const isMin=row.hlMin&&numVal===minV;
+                        const numVal=row.numFn?row.numFn(c):null;
                         const isSelected=c.cm===cmSafe;
                         return (
-                          <td key={c.cm} style={{padding:"11px 16px",fontSize:13,textAlign:"center",borderBottom:`1px solid ${C.border}`,fontFamily:F.body,background:isMin?C.accentHl:isSelected?C.accentBg:"transparent",fontWeight:isMin||isSelected?700:400,color:isMin?C.accent:C.text,whiteSpace:"nowrap"}}>
+                          <td key={c.cm} style={{
+                            padding:"11px 16px",fontSize:13,textAlign:"center",
+                            borderBottom:`1px solid ${C.border}`,fontFamily:F.body,
+                            background:isSelected?C.accentBg:"transparent",
+                            fontWeight:row.bold||isSelected?700:400,
+                            color:C.text,whiteSpace:"nowrap",
+                          }}>
                             {vals[ci]}
                           </td>
                         );
@@ -383,23 +515,7 @@ export default function App() {
           </div>
         </div>
 
-        {/* DESTAQUES */}
-        <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:16,marginBottom:24}}>
-          {[{title:"Total desembolsado",list:totaisList,min:minT,fmt:(v)=>brl(v)},{title:"Custo puro % do crédito recebido",list:custosList,min:minC,fmt:(v)=>`${v.toFixed(1)}%`}].map((card,ci)=>(
-            <div key={ci} style={{background:C.panel,border:`1px solid ${C.border}`,borderRadius:16,padding:20,boxShadow:"0 2px 12px rgba(0,0,0,0.04)"}}>
-              <div style={{fontSize:11,fontWeight:700,color:C.muted,textTransform:"uppercase",letterSpacing:"0.08em",marginBottom:14,fontFamily:F.body}}>{card.title}</div>
-              <div style={{display:"flex",gap:10}}>
-                {card.list.map((t,i)=>(
-                  <div key={i} style={{flex:1,borderRadius:12,padding:"14px 10px",textAlign:"center",background:t.value===card.min?C.accentBg:"#fafcfa",border:`1.5px solid ${t.value===card.min?C.accent:C.border}`}}>
-                    <div style={{fontSize:11,fontWeight:700,color:t.color,marginBottom:6,textTransform:"uppercase",letterSpacing:"0.06em",fontFamily:F.body}}>{t.label}</div>
-                    <div style={{fontSize:18,fontWeight:700,color:t.value===card.min?C.accent:C.text,fontFamily:F.display,lineHeight:1.1}}>{card.fmt(t.value)}</div>
-                    {t.value===card.min&&<div style={{fontSize:10,color:C.accent,marginTop:5,fontWeight:700}}>✓ menor</div>}
-                  </div>
-                ))}
-              </div>
-            </div>
-          ))}
-        </div>
+        {/* TABELA */}
 
         {/* TABELA */}
         <div style={{background:C.panel,border:`1px solid ${C.border}`,borderRadius:16,boxShadow:"0 2px 12px rgba(0,0,0,0.04)",marginBottom:20,overflow:"hidden"}}>
@@ -461,22 +577,6 @@ export default function App() {
                 <SectionHeader label="Crédito recebido"/>
                 <Row label="Valor financiado / carta de crédito" sub="SAC e Price: imediato · Consórcio: carta reajustada na contemplação" sac={principal} price={principal} cons={ct.cartaTravada} even={false}/>
                 <Row label="Acesso ao imóvel" sac="Mês 1" price="Mês 1" cons={`Mês ${cmSafe} (estimativa)`} even/>
-                {(()=>{
-                  const vals=[sacPct,pricePct,consPct];
-                  const minV=Math.min(...vals);
-                  const colors=[C.sac,C.price,C.cons];
-                  return (
-                    <tr style={{background:"#fafcfa"}}>
-                      <td style={{padding:"12px 18px",fontSize:13,color:C.text,borderBottom:`1px solid ${C.border}`,fontFamily:F.body}}>
-                        <div style={{fontWeight:700}}>Custo puro % do crédito recebido</div>
-                        <div style={{fontSize:11,color:C.muted,marginTop:2}}>(Juros+TR) ÷ principal · (Adm+Fundo+Indexador) ÷ carta reajustada</div>
-                      </td>
-                      {vals.map((v,i)=>(
-                        <td key={i} style={{padding:"12px 18px",fontSize:13,textAlign:"center",fontWeight:v===minV?700:400,color:v===minV?colors[i]:C.text,background:v===minV?C.accentHl:"transparent",borderBottom:`1px solid ${C.border}`,whiteSpace:"nowrap",fontFamily:F.body}}>{v.toFixed(1)}%</td>
-                      ))}
-                    </tr>
-                  );
-                })()}
               </tbody>
             </table>
           </div>
