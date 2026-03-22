@@ -176,6 +176,7 @@ function calcConsorcio(carta,months,adminPct,fundoReservaPct,idxM,cm,lance,promo
   }
 
   let idxPre=0,idxPos=0,cumInstall=0;
+  let prevInstallment=0; // parcela do mês anterior para calcular delta
 
   const rows=Array.from({length:months},(_,i)=>{
     const m=i+1;
@@ -183,30 +184,29 @@ function calcConsorcio(carta,months,adminPct,fundoReservaPct,idxM,cm,lance,promo
 
     if(m<=cm){
       if(promoD>0&&m<recalcMes){
-        // Parcela reduzida (período promocional)
         parcelaBase_m=parcelaBase*(1+idxM)**(m-1);
         installment=parcelaBase_m*(1-promoD);
       } else if(promoD>0&&m>=recalcMes){
-        // Pós-recálculo: parcelaRecalcBase × fatorIdx relativo ao recalcMes
         parcelaBase_m=parcelaRecalcBase*(1+idxM)**(m-recalcMes);
         installment=parcelaBase_m;
       } else {
-        // Sem promoção
         parcelaBase_m=parcelaBase*(1+idxM)**(m-1);
         installment=parcelaBase_m;
       }
-      idxAdj=Math.max(parcelaBase_m-parcelaBase,0);
+      // Delta mês a mês — quanto o indexador acrescentou neste mês
+      idxAdj=m===1?0:Math.max(installment-prevInstallment,0);
       idxPre+=idxAdj;
     } else {
-      // Pós-contemplação
       parcelaBase_m=parcelaPosBase*(1+idxM)**(m-cm);
-      idxAdj=Math.max(parcelaBase_m-parcelaPosBase,0);
-      idxPos+=idxAdj;
       installment=parcelaBase_m;
+      // Delta mês a mês — contínuo mesmo após contemplação
+      idxAdj=Math.max(installment-prevInstallment,0);
+      idxPos+=idxAdj;
     }
 
     if(m===cm) cumInstall+=lanceEfetivo;
     cumInstall+=installment;
+    prevInstallment=installment;
     return {month:m,installment,installmentBase:parcelaBase_m,idxAdj,cumInstall,isPos:m>cm};
   });
 
@@ -493,6 +493,164 @@ function HistoricoTabela({sac,price,cons,cmSafe,carta,admin,fundo,prazoCons}) {
   );
 }
 
+
+// ─── FLUXO DE CAIXA COMPONENT ────────────────────────────────────────────────
+function FluxoCaixa({sac,price,cons,cmSafe,entrada,fgts,lance,aluguelPorMes}) {
+  const [open,setOpen]=useState(false);
+  const [modo,setModo]=useState("anual");
+
+  const maxM=Math.max(sac.rows.length,price.rows.length,cons.rows.length);
+
+  // Meses a exibir
+  const meses=useMemo(()=>{
+    if(modo==="mensal") return Array.from({length:maxM},(_,i)=>i+1);
+    // Anual: mês 1 + múltiplos de 12 + último mês
+    const s=new Set([1]);
+    for(let m=12;m<=maxM;m+=12) s.add(m);
+    s.add(maxM);
+    return [...s].sort((a,b)=>a-b);
+  },[modo,maxM]);
+
+  const thS={padding:"9px 12px",fontSize:11,fontWeight:700,textAlign:"right",
+    color:C.muted,borderBottom:`1px solid ${C.border}`,background:C.soft,
+    fontFamily:F.body,textTransform:"uppercase",letterSpacing:"0.07em",whiteSpace:"nowrap"};
+  const tdN=(v,bold,color,bg)=>({
+    padding:"8px 12px",fontSize:12,textAlign:"right",
+    borderBottom:`1px solid ${C.border}`,fontFamily:F.body,
+    fontWeight:bold?700:400,color:color||C.text,
+    whiteSpace:"nowrap",background:bg||"transparent"
+  });
+  const tdM={padding:"8px 12px",fontSize:12,textAlign:"center",
+    borderBottom:`1px solid ${C.border}`,fontFamily:F.body,
+    color:C.muted,whiteSpace:"nowrap",fontWeight:500};
+
+  return (
+    <div style={{background:C.panel,border:`1px solid ${C.border}`,borderRadius:16,
+      boxShadow:"0 2px 12px rgba(0,0,0,0.04)",marginBottom:16,overflow:"hidden"}}>
+
+      {/* Header */}
+      <button onClick={()=>setOpen(o=>!o)} style={{width:"100%",background:"none",
+        border:"none",cursor:"pointer",padding:"16px 22px",display:"flex",
+        alignItems:"center",justifyContent:"space-between",fontFamily:F.body}}>
+        <div style={{display:"flex",alignItems:"center",gap:12,flexWrap:"wrap"}}>
+          <span style={{fontFamily:F.display,fontSize:17,fontWeight:700,color:C.text}}>
+            Fluxo de caixa comparativo
+          </span>
+          <span style={{fontSize:12,color:C.muted}}>
+            Parcela mensal lado a lado — SAC · Price · Consórcio
+          </span>
+        </div>
+        <span style={{fontSize:18,color:C.muted,transition:"transform 0.2s",
+          transform:open?"rotate(180deg)":"rotate(0deg)"}}>▾</span>
+      </button>
+
+      {open&&(
+        <div>
+          {/* Controles */}
+          <div style={{padding:"0 22px 14px",display:"flex",alignItems:"center",
+            justifyContent:"space-between",flexWrap:"wrap",gap:10,
+            borderBottom:`1px solid ${C.border}`}}>
+            <div style={{fontSize:12,color:C.muted,fontFamily:F.body}}>
+              Entradas destacadas em negrito · ★ = contemplação do consórcio
+            </div>
+            <div style={{display:"flex",gap:6}}>
+              {["anual","mensal"].map(m=>(
+                <button key={m} onClick={()=>setModo(m)} style={{
+                  padding:"6px 14px",borderRadius:8,
+                  border:`1.5px solid ${modo===m?C.accent:C.border}`,
+                  background:modo===m?C.accentBg:"#fff",
+                  color:modo===m?C.accent:C.muted,
+                  fontFamily:F.body,fontSize:12,fontWeight:600,cursor:"pointer"}}>
+                  {m==="anual"?"A cada 12 meses":"Mensal completo"}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          <div style={{overflowX:"auto",maxHeight:480,overflowY:"auto"}}>
+            <table cellPadding="0" style={{borderCollapse:"separate",borderSpacing:0,
+              width:"100%",minWidth:620}}>
+              <thead style={{position:"sticky",top:0,zIndex:2}}>
+                <tr>
+                  <th style={{...thS,textAlign:"center",width:60}}>Mês</th>
+                  <th style={{...thS,color:C.sac}}>SAC</th>
+                  <th style={{...thS,color:C.price}}>Price</th>
+                  <th style={{...thS,color:C.cons}}>Consórcio</th>
+                  <th style={{...thS}}>Menor</th>
+                </tr>
+              </thead>
+              <tbody>
+                {/* Linha de entrada/lance — mês 0 */}
+                {(entrada>0||fgts>0||lance>0)&&(
+                  <tr style={{background:C.accentBg}}>
+                    <td style={{...tdM,color:C.accent,fontWeight:700}}>0</td>
+                    <td style={tdN(entrada+fgts,true,C.sac,C.accentBg)}>
+                      {entrada+fgts>0?<><strong>{brl(entrada+fgts)}</strong><br/><span style={{fontSize:10,color:C.muted}}>entrada{fgts>0?" + FGTS":""}</span></>:"—"}
+                    </td>
+                    <td style={tdN(entrada+fgts,true,C.price,C.accentBg)}>
+                      {entrada+fgts>0?<><strong>{brl(entrada+fgts)}</strong><br/><span style={{fontSize:10,color:C.muted}}>entrada{fgts>0?" + FGTS":""}</span></>:"—"}
+                    </td>
+                    <td style={tdN(lance,true,C.cons,C.accentBg)}>
+                      {lance>0?<><strong>{brl(lance)}</strong><br/><span style={{fontSize:10,color:C.muted}}>lance próprio</span></>:<span style={{color:C.muted}}>—</span>}
+                    </td>
+                    <td style={tdN(null,false,C.muted,C.accentBg)}>
+                      <span style={{fontSize:10,color:C.muted}}>desembolso inicial</span>
+                    </td>
+                  </tr>
+                )}
+
+                {meses.map((m,i)=>{
+                  const sr=sac.rows[m-1];
+                  const pr=price.rows[m-1];
+                  const cr=cons.rows[m-1];
+                  const sv=sr?.installment??null;
+                  const pv=pr?.installment??null;
+                  // Consórcio: adiciona aluguel se pré-contemplação
+                  const alug=m<=cmSafe?(aluguelPorMes[m-1]||0):0;
+                  const cv=cr?(cr.installment+alug):null;
+                  const nums=[sv,pv,cv].filter(v=>v!==null);
+                  const minV=nums.length?Math.min(...nums):null;
+                  const isContemplacao=m===cmSafe;
+                  const rowBg=isContemplacao?C.accentBg:i%2===0?"#fff":"#fafcfa";
+
+                  return (
+                    <tr key={m} style={{background:rowBg}}>
+                      <td style={{...tdM,color:isContemplacao?C.accent:C.muted,fontWeight:isContemplacao?700:500}}>
+                        {m}{isContemplacao?" ★":""}
+                      </td>
+                      {[{v:sv,color:C.sac},{v:pv,color:C.price},{v:cv,color:C.cons,alug}].map((item,j)=>{
+                        const isMin=item.v!==null&&item.v===minV;
+                        return (
+                          <td key={j} style={tdN(item.v,isMin,isMin?item.color:C.text,isMin?C.accentHl:rowBg)}>
+                            {item.v===null
+                              ?<span style={{color:C.border}}>—</span>
+                              :<>
+                                {brl(item.v)}
+                                {item.alug>0&&<><br/><span style={{fontSize:10,color:C.muted}}>+{brl(item.alug)} aluguel</span></>}
+                              </>
+                            }
+                          </td>
+                        );
+                      })}
+                      <td style={{...tdN(null,false),textAlign:"center"}}>
+                        {minV!==null&&(
+                          <span style={{fontSize:11,fontWeight:700,
+                            color:sv===minV?C.sac:pv===minV?C.price:C.cons}}>
+                            {sv===minV?"SAC":pv===minV?"Price":"Consórcio"}
+                          </span>
+                        )}
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
 
 // ─── APP ──────────────────────────────────────────────────────────────────────
 export default function App() {
@@ -858,6 +1016,9 @@ export default function App() {
 
         {/* HISTÓRICO DE PARCELAS */}
         <HistoricoTabela sac={sac} price={price} cons={cons} cmSafe={cmSafe} carta={carta} admin={admin} fundo={fundo} prazoCons={prazoCons}/>
+
+        {/* FLUXO DE CAIXA */}
+        <FluxoCaixa sac={sac} price={price} cons={cons} cmSafe={cmSafe} entrada={entrada} fgts={fgts} lance={ct.lanceEfetivo||0} aluguelPorMes={aluguelPorMes}/>
 
         {/* NOTA */}
         <div style={{background:C.goldBg,border:"1px solid #e8d48a",borderRadius:12,padding:"14px 18px",fontSize:12,color:"#6b4f10",lineHeight:1.7,fontFamily:F.body}}>
