@@ -54,17 +54,19 @@ const pmtFn = (pv,r,n) => { if(n<=0)return 0; if(Math.abs(r)<1e-12)return pv/n; 
 // ─── CALC: SAC ────────────────────────────────────────────────────────────────
 function calcSac(principal,rM,trM,months) {
   if(principal<=0||months<=0) return {rows:[],totals:{}};
-  const amort=principal/months;
   let bal=principal,cumInstall=0,cumInterest=0,cumTR=0,cumAmort=0;
   const rows=Array.from({length:months},(_,i)=>{
-    const tr=bal*trM; bal+=tr;
-    const interest=bal*rM; const installment=amort+interest;
+    const remaining=months-i;
+    const tr=bal*trM; bal+=tr;           // corrige saldo pela TR
+    const amort=bal/remaining;           // amort = saldo corrigido / meses restantes
+    const interest=bal*rM;              // juros sobre saldo corrigido
+    const installment=amort+interest;
     bal=Math.max(bal-amort,0);
     cumInstall+=installment; cumInterest+=interest; cumTR+=tr; cumAmort+=amort;
     return {month:i+1,installment,interest,tr,amort,bal,cumInstall,cumInterest,cumTR,cumAmort};
   });
   const last=rows[rows.length-1];
-  return {rows,totals:{installFirst:rows[0].installment,installLast:last.installment,totalInterest:last.cumInterest,totalTR:last.cumTR,totalAmort:last.cumAmort,totalPaid:last.cumInstall}};
+  return {rows,totals:{installFirst:rows[0].installment,installLast:last.installment,totalInterest:last.cumInterest,totalTR:last.cumTR,totalAmort:principal,totalPaid:last.cumInstall}};
 }
 
 // ─── CALC: PRICE ──────────────────────────────────────────────────────────────
@@ -344,6 +346,154 @@ const CustomTooltip=({active,payload,label})=>{
   );
 };
 
+// ─── HISTÓRICO COMPONENT ─────────────────────────────────────────────────────
+function HistoricoTabela({sac,price,cons,cmSafe,carta,admin,fundo,prazoCons}) {
+  const [open,setOpen]=useState(false);
+  const [aba,setAba]=useState("SAC");
+  const [modo,setModo]=useState("anual");
+
+  const thS={padding:"9px 12px",fontSize:11,fontWeight:700,textAlign:"center",color:C.muted,borderBottom:`1px solid ${C.border}`,background:C.soft,fontFamily:F.body,textTransform:"uppercase",letterSpacing:"0.07em",whiteSpace:"nowrap"};
+  const tdC=(bold,color)=>({padding:"8px 12px",fontSize:12,textAlign:"right",borderBottom:`1px solid ${C.border}`,fontFamily:F.body,fontWeight:bold?600:400,color:color||C.text,whiteSpace:"nowrap"});
+  const tdL={padding:"8px 12px",fontSize:12,textAlign:"center",borderBottom:`1px solid ${C.border}`,fontFamily:F.body,color:C.muted,whiteSpace:"nowrap"};
+
+  const filterRows=(rows)=>modo==="anual"
+    ?rows.filter(r=>r.month%12===0||r.month===1||r.month===(rows.length))
+    :rows;
+
+  const sacRows=filterRows(sac.rows||[]);
+  const priceRows=filterRows(price.rows||[]);
+  const consRows=filterRows(cons.rows||[]);
+  const abas=[{id:"SAC",color:C.sac},{id:"Price",color:C.price},{id:"Consórcio",color:C.cons}];
+
+  return (
+    <div style={{background:C.panel,border:`1px solid ${C.border}`,borderRadius:16,boxShadow:"0 2px 12px rgba(0,0,0,0.04)",marginBottom:16,overflow:"hidden"}}>
+      <button onClick={()=>setOpen(o=>!o)} style={{width:"100%",background:"none",border:"none",cursor:"pointer",padding:"16px 22px",display:"flex",alignItems:"center",justifyContent:"space-between",fontFamily:F.body}}>
+        <div style={{display:"flex",alignItems:"center",gap:12,flexWrap:"wrap"}}>
+          <span style={{fontFamily:F.display,fontSize:17,fontWeight:700,color:C.text}}>Histórico detalhado de parcelas</span>
+          <span style={{fontSize:12,color:C.muted}}>SAC · Price · Consórcio — amortização, juros e custos mês a mês</span>
+        </div>
+        <span style={{fontSize:18,color:C.muted,transition:"transform 0.2s",display:"block",transform:open?"rotate(180deg)":"rotate(0deg)"}}>▾</span>
+      </button>
+
+      {open&&(
+        <div>
+          <div style={{padding:"0 22px 14px",display:"flex",alignItems:"center",justifyContent:"space-between",flexWrap:"wrap",gap:10,borderBottom:`1px solid ${C.border}`}}>
+            <div style={{display:"flex",gap:6}}>
+              {abas.map(a=>(
+                <button key={a.id} onClick={()=>setAba(a.id)} style={{padding:"6px 16px",borderRadius:8,border:`1.5px solid ${aba===a.id?a.color:C.border}`,background:aba===a.id?a.color:"#fff",color:aba===a.id?"#fff":C.muted,fontFamily:F.body,fontSize:12,fontWeight:600,cursor:"pointer",transition:"all 0.15s"}}>
+                  {a.id}
+                </button>
+              ))}
+            </div>
+            <div style={{display:"flex",gap:6}}>
+              {["anual","mensal"].map(m=>(
+                <button key={m} onClick={()=>setModo(m)} style={{padding:"6px 14px",borderRadius:8,border:`1.5px solid ${modo===m?C.accent:C.border}`,background:modo===m?C.accentBg:"#fff",color:modo===m?C.accent:C.muted,fontFamily:F.body,fontSize:12,fontWeight:600,cursor:"pointer",transition:"all 0.15s"}}>
+                  {m==="anual"?"A cada 12 meses":"Mensal completo"}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          {aba==="SAC"&&(
+            <div style={{overflowX:"auto",maxHeight:420,overflowY:"auto"}}>
+              <table cellPadding="0" style={{borderCollapse:"separate",borderSpacing:0,width:"100%",minWidth:520}}>
+                <thead style={{position:"sticky",top:0,zIndex:2}}>
+                  <tr>
+                    <th style={{...thS,textAlign:"center"}}>Mês</th>
+                    <th style={thS}>Saldo devedor</th>
+                    <th style={{...thS,color:C.sac}}>Amortização</th>
+                    <th style={{...thS,color:C.sac}}>Juros</th>
+                    <th style={thS}>TR</th>
+                    <th style={{...thS,color:C.sac}}>Parcela</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {sacRows.map((r,i)=>(
+                    <tr key={r.month} style={{background:i%2===0?"#fff":"#fafcfa"}}>
+                      <td style={tdL}>{r.month}</td>
+                      <td style={tdC()}>{brl(r.bal)}</td>
+                      <td style={tdC(true,C.sac)}>{brl(r.amort)}</td>
+                      <td style={tdC()}>{brl(r.interest)}</td>
+                      <td style={tdC()}>{brl(r.tr)}</td>
+                      <td style={tdC(true)}>{brl(r.installment)}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+
+          {aba==="Price"&&(
+            <div style={{overflowX:"auto",maxHeight:420,overflowY:"auto"}}>
+              <table cellPadding="0" style={{borderCollapse:"separate",borderSpacing:0,width:"100%",minWidth:520}}>
+                <thead style={{position:"sticky",top:0,zIndex:2}}>
+                  <tr>
+                    <th style={{...thS,textAlign:"center"}}>Mês</th>
+                    <th style={thS}>Saldo devedor</th>
+                    <th style={{...thS,color:C.price}}>Amortização</th>
+                    <th style={{...thS,color:C.price}}>Juros</th>
+                    <th style={thS}>TR</th>
+                    <th style={{...thS,color:C.price}}>Parcela</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {priceRows.map((r,i)=>(
+                    <tr key={r.month} style={{background:i%2===0?"#fff":"#fafcfa"}}>
+                      <td style={tdL}>{r.month}</td>
+                      <td style={tdC()}>{brl(r.bal)}</td>
+                      <td style={tdC(true,C.price)}>{brl(r.amort)}</td>
+                      <td style={tdC()}>{brl(r.interest)}</td>
+                      <td style={tdC()}>{brl(r.tr)}</td>
+                      <td style={tdC(true)}>{brl(r.installment)}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+
+          {aba==="Consórcio"&&(
+            <div style={{overflowX:"auto",maxHeight:420,overflowY:"auto"}}>
+              <table cellPadding="0" style={{borderCollapse:"separate",borderSpacing:0,width:"100%",minWidth:600}}>
+                <thead style={{position:"sticky",top:0,zIndex:2}}>
+                  <tr>
+                    <th style={{...thS,textAlign:"center"}}>Mês</th>
+                    <th style={{...thS,color:C.cons}}>Fundo comum</th>
+                    <th style={{...thS,color:C.cons}}>Taxa de adm</th>
+                    <th style={{...thS,color:C.cons}}>Fundo reserva</th>
+                    <th style={thS}>Indexador</th>
+                    <th style={{...thS,color:C.cons}}>Parcela</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {consRows.map((r,i)=>{
+                    const grossBase=carta*(1+admin/100+fundo/100)/prazoCons;
+                    const fatorM=grossBase>0?r.installmentBase/grossBase:1;
+                    const fundoComum=(carta/prazoCons)*fatorM;
+                    const taxaAdm=(carta*admin/100/prazoCons)*fatorM;
+                    const fundoRes=(carta*fundo/100/prazoCons)*fatorM;
+                    return (
+                      <tr key={r.month} style={{background:i%2===0?"#fff":"#fafcfa"}}>
+                        <td style={{...tdL,color:r.month>=cmSafe?C.accent:C.muted}}>{r.month}{r.month===cmSafe?" ★":""}</td>
+                        <td style={tdC(true,C.cons)}>{brl(fundoComum)}</td>
+                        <td style={tdC()}>{brl(taxaAdm)}</td>
+                        <td style={tdC()}>{brl(fundoRes)}</td>
+                        <td style={tdC()}>{brl(r.idxAdj)}</td>
+                        <td style={tdC(true)}>{brl(r.installment)}</td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+
 // ─── APP ──────────────────────────────────────────────────────────────────────
 export default function App() {
   const [imovel,setImovel]=useState(500000);
@@ -604,109 +754,142 @@ export default function App() {
             <div style={{fontSize:12,color:C.muted,marginTop:2,fontFamily:F.body}}>Verde = menor valor na linha</div>
           </div>
           <div style={{overflowX:"auto"}}>
-            <table cellPadding="0" style={{borderCollapse:"separate",borderSpacing:0,width:"100%",minWidth:560}}>
-              <thead>
-                <tr>
-                  <th style={{...thCol(C.muted),textAlign:"left",width:"34%"}}>Indicador</th>
-                  <th style={thCol(C.sac)}>SAC</th>
-                  <th style={thCol(C.price)}>Price</th>
-                  <th style={thCol(C.cons)}>Consórcio</th>
-                </tr>
-              </thead>
-              <tbody>
-                <SectionHeader label="Parcelas"/>
-                <Row label="Parcela inicial" sac={st.installFirst} price={pt.installFirst} cons={ct.installFirst} hlMin even={false}/>
-                <Row label="Parcela final"   sac={st.installLast}  price={pt.installLast}  cons={ct.installLast}  hlMin even/>
+            <table cellPadding="0" style={{borderCollapse:"separate",borderSpacing:0,width:"100%",minWidth:560}        {/* HISTÓRICO DE PARCELAS */}
+        <HistoricoTabela sac={sac} price={price} cons={cons} cmSafe={cmSafe} carta={carta} admin={admin} fundo={fundo} prazoCons={prazoCons}/>
 
-                <SectionHeader label="Custos"/>
-                <Row label="Juros + seguros + taxas (CET)" sub="Custo Efetivo Total contratado" sac={st.totalInterest} price={pt.totalInterest} cons={null} even={false}/>
-                <Row label="TR" sac={st.totalTR} price={pt.totalTR} cons={null} even/>
-                <Row label="Taxa de administração" sac={null} price={null} cons={ct.totalAdm} even={false}/>
-                <Row label="Fundo de reserva" sub="Pode ser devolvido ao final se houver saldo" sac={null} price={null} cons={ct.totalFundo} even/>
-                <Row label="Indexador pré-contemplação" sub="Carta e parcela crescem juntas" sac={null} price={null} cons={ct.totalIdxPre} even={false}/>
-                <Row label="Indexador pós-contemplação" sub="Carta travada, parcela ainda cresce — custo puro" sac={null} price={null} cons={ct.totalIdxPos} even/>
+             {/* Header clicável */}
+              <button onClick={()=>setOpen(o=>!o)} style={{width:"100%",background:"none",border:"none",cursor:"pointer",padding:"16px 22px",display:"flex",alignItems:"center",justifyContent:"space-between",fontFamily:F.body}}>
+                <div style={{display:"flex",alignItems:"center",gap:12}}>
+                  <span style={{fontFamily:F.display,fontSize:17,fontWeight:700,color:C.text}}>Histórico detalhado de parcelas</span>
+                  <span style={{fontSize:12,color:C.muted}}>SAC · Price · Consórcio — amortização, juros e custos mês a mês</span>
+                </div>
+                <span style={{fontSize:18,color:C.muted,transition:"transform 0.2s",transform:open?"rotate(180deg)":"rotate(0deg)"}}>▾</span>
+              </button>
 
-                <SectionHeader label="Desembolso total"/>
-                <Row label="Amortização" sub="Capital devolvido ao imóvel" sac={st.totalAmort} price={pt.totalAmort} cons={ct.totalAmort} even={false}/>
-                <Row label="Juros + seguros + taxas" sac={st.totalInterest} price={pt.totalInterest} cons={null} even/>
-                <Row label="TR paga" sac={st.totalTR} price={pt.totalTR} cons={null} even={false}/>
-                <Row label="Taxa de administração" sac={null} price={null} cons={ct.totalAdm} even/>
-                <Row label="Fundo de reserva" sac={null} price={null} cons={ct.totalFundo} even={false}/>
-                <Row label="Indexador total" sac={null} price={null} cons={(ct.totalIdxPre||0)+(ct.totalIdxPos||0)} even/>
-                <Row label="Entrada / lance" sac={entrada} price={entrada} cons={ct.lanceEfetivo} even={false}/>
-                <Row label="FGTS utilizado" sub="Reduz o principal financiado" sac={fgts>0?fgts:null} price={fgts>0?fgts:null} cons={null} even/>
-                <Row label="Aluguel durante espera" sub={aluguelTotal>0?`${cmSafe} meses · reajustado pelo indexador`:"Não informado"} sac={null} price={null} cons={aluguelTotal>0?aluguelTotal:null} even={false}/>
-
-                {(()=>{
-                  const vals=[sacTotal,priceTotal,consTotal];
-                  const minV=Math.min(...vals);
-                  const colors=[C.sac,C.price,C.cons];
-                  return (
-                    <tr style={{background:C.accentBg}}>
-                      <td style={{padding:"14px 18px",fontSize:14,fontWeight:700,color:C.text,borderBottom:`1px solid ${C.borderMid}`,borderTop:`2px solid ${C.borderMid}`,fontFamily:F.body}}>
-                        Total desembolsado
-                        <div style={{fontSize:11,color:C.muted,fontWeight:400,marginTop:1}}>Parcelas + entrada / lance + aluguel</div>
-                      </td>
-                      {vals.map((v,i)=>(
-                        <td key={i} style={{padding:"14px 18px",fontSize:14,textAlign:"center",fontWeight:v===minV?700:500,color:v===minV?colors[i]:C.text,background:v===minV?C.accentHl:C.accentBg,borderBottom:`1px solid ${C.borderMid}`,borderTop:`2px solid ${C.borderMid}`,whiteSpace:"nowrap",fontFamily:F.body}}>{brl(v)}</td>
+              {open&&(
+                <div>
+                  {/* Controles */}
+                  <div style={{padding:"0 22px 14px",display:"flex",alignItems:"center",justifyContent:"space-between",flexWrap:"wrap",gap:10,borderBottom:`1px solid ${C.border}`}}>
+                    {/* Abas */}
+                    <div style={{display:"flex",gap:6}}>
+                      {abas.map(a=>(
+                        <button key={a.id} onClick={()=>setAba(a.id)} style={{padding:"6px 16px",borderRadius:8,border:`1.5px solid ${aba===a.id?a.color:C.border}`,background:aba===a.id?a.color:"#fff",color:aba===a.id?"#fff":C.muted,fontFamily:F.body,fontSize:12,fontWeight:600,cursor:"pointer",transition:"all 0.15s"}}>
+                          {a.id}
+                        </button>
                       ))}
-                    </tr>
-                  );
-                })()}
+                    </div>
+                    {/* Toggle mensal/anual */}
+                    <div style={{display:"flex",gap:6}}>
+                      {["anual","mensal"].map(m=>(
+                        <button key={m} onClick={()=>setModo(m)} style={{padding:"6px 14px",borderRadius:8,border:`1.5px solid ${modo===m?C.accent:C.border}`,background:modo===m?C.accentBg:"#fff",color:modo===m?C.accent:C.muted,fontFamily:F.body,fontSize:12,fontWeight:600,cursor:"pointer",transition:"all 0.15s"}}>
+                          {m==="anual"?"A cada 12 meses":"Mensal completo"}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
 
-                <SectionHeader label="Crédito recebido"/>
-                <Row label="Valor financiado / carta de crédito" sub="SAC e Price: imediato · Consórcio: carta reajustada na contemplação" sac={principal} price={principal} cons={ct.cartaTravada} even={false}/>
-                <Row label="Acesso ao imóvel" sac="Mês 1" price="Mês 1" cons={`Mês ${cmSafe} (estimativa)`} even/>
-              </tbody>
-            </table>
-          </div>
-        </div>
+                  {/* Tabela SAC */}
+                  {aba==="SAC"&&(
+                    <div style={{overflowX:"auto",maxHeight:420,overflowY:"auto"}}>
+                      <table cellPadding="0" style={{borderCollapse:"separate",borderSpacing:0,width:"100%",minWidth:560}}>
+                        <thead style={{position:"sticky",top:0,zIndex:2}}>
+                          <tr>
+                            <th style={{...thS,textAlign:"center"}}>Mês</th>
+                            <th style={thS}>Saldo devedor</th>
+                            <th style={{...thS,color:C.sac}}>Amortização</th>
+                            <th style={{...thS,color:C.sac}}>Juros</th>
+                            <th style={thS}>TR</th>
+                            <th style={{...thS,color:C.sac}}>Parcela</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {sacRows.map((r,i)=>(
+                            <tr key={r.month} style={{background:i%2===0?"#fff":"#fafcfa"}}>
+                              <td style={tdL}>{r.month}</td>
+                              <td style={td(r.bal)}>{brl(r.bal)}</td>
+                              <td style={td(r.amort,true,C.sac)}>{brl(r.amort)}</td>
+                              <td style={td(r.interest)}>{brl(r.interest)}</td>
+                              <td style={td(r.tr)}>{brl(r.tr)}</td>
+                              <td style={td(r.installment,true)}>{brl(r.installment)}</td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  )}
 
-        {/* GRÁFICOS */}
-        <ChartCard title="Evolução das parcelas" subtitle="Parcela mensal em cada modalidade ao longo do tempo.">
-          <ResponsiveContainer>
-            <LineChart data={chartParcelas}>
-              <CartesianGrid strokeDasharray="3 3" stroke={C.border}/>
-              <XAxis dataKey="month" tick={{fontSize:11,fontFamily:F.body,fill:C.muted}}/>
-              <YAxis tickFormatter={v=>`R$${(v/1000).toFixed(0)}k`} tick={{fontSize:11,fontFamily:F.body,fill:C.muted}}/>
-              <Tooltip content={<CustomTooltip/>}/><Legend wrapperStyle={{fontFamily:F.body,fontSize:12}}/>
-              <ReferenceLine x={cmSafe} stroke={C.cons} strokeDasharray="5 4" label={{value:"Contemplação",fill:C.cons,fontSize:10,fontFamily:F.body}}/>
-              <Line type="monotone" dataKey="SAC"       stroke={C.sac}   strokeWidth={2.5} dot={false} strokeLinecap="round"/>
-              <Line type="monotone" dataKey="Price"     stroke={C.price} strokeWidth={2.5} dot={false} strokeLinecap="round"/>
-              <Line type="monotone" dataKey="Consórcio" stroke={C.cons}  strokeWidth={2.5} dot={false} strokeLinecap="round"/>
-            </LineChart>
-          </ResponsiveContainer>
-        </ChartCard>
+                  {/* Tabela Price */}
+                  {aba==="Price"&&(
+                    <div style={{overflowX:"auto",maxHeight:420,overflowY:"auto"}}>
+                      <table cellPadding="0" style={{borderCollapse:"separate",borderSpacing:0,width:"100%",minWidth:560}}>
+                        <thead style={{position:"sticky",top:0,zIndex:2}}>
+                          <tr>
+                            <th style={{...thS,textAlign:"center"}}>Mês</th>
+                            <th style={thS}>Saldo devedor</th>
+                            <th style={{...thS,color:C.price}}>Amortização</th>
+                            <th style={{...thS,color:C.price}}>Juros</th>
+                            <th style={thS}>TR</th>
+                            <th style={{...thS,color:C.price}}>Parcela</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {priceRows.map((r,i)=>(
+                            <tr key={r.month} style={{background:i%2===0?"#fff":"#fafcfa"}}>
+                              <td style={tdL}>{r.month}</td>
+                              <td style={td(r.bal)}>{brl(r.bal)}</td>
+                              <td style={td(r.amort,true,C.price)}>{brl(r.amort)}</td>
+                              <td style={td(r.interest)}>{brl(r.interest)}</td>
+                              <td style={td(r.tr)}>{brl(r.tr)}</td>
+                              <td style={td(r.installment,true)}>{brl(r.installment)}</td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  )}
 
-        <ChartCard title="Desembolso total acumulado" subtitle="Tudo que saiu do bolso acumulado mês a mês (parcelas + entrada/lance + aluguel).">
-          <ResponsiveContainer>
-            <LineChart data={chartDesembolso}>
-              <CartesianGrid strokeDasharray="3 3" stroke={C.border}/>
-              <XAxis dataKey="month" tick={{fontSize:11,fontFamily:F.body,fill:C.muted}}/>
-              <YAxis tickFormatter={v=>`R$${(v/1000).toFixed(0)}k`} tick={{fontSize:11,fontFamily:F.body,fill:C.muted}}/>
-              <Tooltip content={<CustomTooltip/>}/><Legend wrapperStyle={{fontFamily:F.body,fontSize:12}}/>
-              <ReferenceLine x={cmSafe} stroke={C.cons} strokeDasharray="5 4" label={{value:"Contemplação",fill:C.cons,fontSize:10,fontFamily:F.body}}/>
-              <Line type="monotone" dataKey="SAC"       stroke={C.sac}   strokeWidth={2.5} dot={false} strokeLinecap="round"/>
-              <Line type="monotone" dataKey="Price"     stroke={C.price} strokeWidth={2.5} dot={false} strokeLinecap="round"/>
-              <Line type="monotone" dataKey="Consórcio" stroke={C.cons}  strokeWidth={2.5} dot={false} strokeLinecap="round"/>
-            </LineChart>
-          </ResponsiveContainer>
-        </ChartCard>
-
-        <ChartCard title="Patrimônio líquido ao longo do tempo" subtitle="Valor do imóvel reajustado menos saldo devedor. Consórcio parte do zero — patrimônio existe só após a contemplação.">
-          <ResponsiveContainer>
-            <LineChart data={chartPatrimonio}>
-              <CartesianGrid strokeDasharray="3 3" stroke={C.border}/>
-              <XAxis dataKey="month" tick={{fontSize:11,fontFamily:F.body,fill:C.muted}}/>
-              <YAxis tickFormatter={v=>`R$${(v/1000).toFixed(0)}k`} tick={{fontSize:11,fontFamily:F.body,fill:C.muted}}/>
-              <Tooltip content={<CustomTooltip/>}/><Legend wrapperStyle={{fontFamily:F.body,fontSize:12}}/>
-              <ReferenceLine x={cmSafe} stroke={C.cons} strokeDasharray="5 4" label={{value:"Contemplação",fill:C.cons,fontSize:10,fontFamily:F.body}}/>
-              <Line type="monotone" dataKey="SAC"       stroke={C.sac}   strokeWidth={2.5} dot={false} strokeLinecap="round"/>
-              <Line type="monotone" dataKey="Price"     stroke={C.price} strokeWidth={2.5} dot={false} strokeLinecap="round"/>
-              <Line type="monotone" dataKey="Consórcio" stroke={C.cons}  strokeWidth={2.5} dot={false} strokeLinecap="round"/>
-            </LineChart>
-          </ResponsiveContainer>
-        </ChartCard>
+                  {/* Tabela Consórcio */}
+                  {aba==="Consórcio"&&(
+                    <div style={{overflowX:"auto",maxHeight:420,overflowY:"auto"}}>
+                      <table cellPadding="0" style={{borderCollapse:"separate",borderSpacing:0,width:"100%",minWidth:640}}>
+                        <thead style={{position:"sticky",top:0,zIndex:2}}>
+                          <tr>
+                            <th style={{...thS,textAlign:"center"}}>Mês</th>
+                            <th style={{...thS,color:C.cons}}>Fundo comum</th>
+                            <th style={{...thS,color:C.cons}}>Taxa de adm</th>
+                            <th style={{...thS,color:C.cons}}>Fundo reserva</th>
+                            <th style={thS}>Indexador</th>
+                            <th style={{...thS,color:C.cons}}>Parcela</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {consRows.map((r,i)=>{
+                            const grossBase=carta*(1+admin/100+fundo/100)/prazoCons;
+                            const fundoComum=carta/prazoCons;
+                            const taxaAdm=(carta*admin/100)/prazoCons;
+                            const fundoRes=(carta*fundo/100)/prazoCons;
+                            const fatorM=r.installmentBase/grossBase;
+                            const idxAdj=Math.max(r.installment-grossBase*fatorM,0);
+                            return (
+                              <tr key={r.month} style={{background:i%2===0?"#fff":"#fafcfa",opacity:r.month<cmSafe?1:0.85}}>
+                                <td style={{...tdL,color:r.month>=cmSafe?C.accent:C.muted}}>{r.month}{r.month===cmSafe?" ★":""}</td>
+                                <td style={td(fundoComum*fatorM,true,C.cons)}>{brl(fundoComum*fatorM)}</td>
+                                <td style={td(taxaAdm*fatorM)}>{brl(taxaAdm*fatorM)}</td>
+                                <td style={td(fundoRes*fatorM)}>{brl(fundoRes*fatorM)}</td>
+                                <td style={td(r.idxAdj)}>{brl(r.idxAdj)}</td>
+                                <td style={td(r.installment,true)}>{brl(r.installment)}</td>
+                              </tr>
+                            );
+                          })}
+                        </tbody>
+                      </table>
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
+          );
+        })()}
 
         {/* NOTA */}
         <div style={{background:C.goldBg,border:"1px solid #e8d48a",borderRadius:12,padding:"14px 18px",fontSize:12,color:"#6b4f10",lineHeight:1.7,fontFamily:F.body}}>
