@@ -176,7 +176,6 @@ function calcConsorcio(carta,months,adminPct,fundoReservaPct,idxM,cm,lance,promo
   }
 
   let idxPre=0,idxPos=0,cumInstall=0;
-  let prevInstallment=0; // parcela do mês anterior para calcular delta
 
   const rows=Array.from({length:months},(_,i)=>{
     const m=i+1;
@@ -193,20 +192,19 @@ function calcConsorcio(carta,months,adminPct,fundoReservaPct,idxM,cm,lance,promo
         parcelaBase_m=parcelaBase*(1+idxM)**(m-1);
         installment=parcelaBase_m;
       }
-      // Delta mês a mês — quanto o indexador acrescentou neste mês
-      idxAdj=m===1?0:Math.max(installment-prevInstallment,0);
+      // Custo do indexador pré = quanto a parcela cresceu acima da base original
+      idxAdj=Math.max(installment-parcelaBase,0);
       idxPre+=idxAdj;
     } else {
       parcelaBase_m=parcelaPosBase*(1+idxM)**(m-cm);
       installment=parcelaBase_m;
-      // Delta mês a mês — contínuo mesmo após contemplação
-      idxAdj=Math.max(installment-prevInstallment,0);
+      // Custo do indexador pós = quanto paga acima da parcelaBase original
+      idxAdj=Math.max(installment-parcelaBase,0);
       idxPos+=idxAdj;
     }
 
     if(m===cm) cumInstall+=lanceEfetivo;
     cumInstall+=installment;
-    prevInstallment=installment;
     return {month:m,installment,installmentBase:parcelaBase_m,idxAdj,cumInstall,isPos:m>cm};
   });
 
@@ -652,6 +650,200 @@ function FluxoCaixa({sac,price,cons,cmSafe,entrada,fgts,lance,aluguelPorMes}) {
   );
 }
 
+// ─── CUSTOS DETALHADOS COMPONENT ─────────────────────────────────────────────
+function CustosDetalhados({st,pt,ct,sacTotal,priceTotal,consTotal,principal,entrada,fgts,aluguelTotal,cmSafe}) {
+  const [open,setOpen]=useState(false);
+
+  const thS={padding:"10px 18px",fontSize:11,fontWeight:700,textAlign:"center",
+    color:C.muted,borderBottom:`1px solid ${C.border}`,background:C.soft,
+    fontFamily:F.body,textTransform:"uppercase",letterSpacing:"0.07em"};
+
+  const renderVal=(v,color,hlMin,minV)=>{
+    if(v===null||v===undefined) return <span style={{color:C.border,fontSize:16}}>—</span>;
+    if(typeof v==="string") return <span style={{color:C.text,fontSize:13}}>{v}</span>;
+    const isMin=hlMin&&v===minV;
+    return <span style={{fontWeight:isMin?700:400,color:isMin?color:C.text,fontSize:13}}>{brl(v)}</span>;
+  };
+
+  const rows=[
+    {label:"Juros + seguros + taxas (CET)",sub:"Custo Efetivo Total contratado",sac:st.totalInterest,price:pt.totalInterest,cons:null,hlMin:true},
+    {label:"TR paga",sac:st.totalTR,price:pt.totalTR,cons:null,hlMin:true},
+    {label:"Taxa de administração",sac:null,price:null,cons:ct.totalAdm,hlMin:false},
+    {label:"Fundo de reserva",sub:"Pode ser devolvido ao final",sac:null,price:null,cons:ct.totalFundo,hlMin:false},
+    {label:"Indexador pré-contemplação",sub:"Carta e parcela crescem juntas",sac:null,price:null,cons:ct.totalIdxPre,hlMin:false},
+    {label:"Indexador pós-contemplação",sub:"Carta travada, parcela ainda cresce",sac:null,price:null,cons:ct.totalIdxPos,hlMin:false},
+    {label:"Aluguel durante espera",sub:aluguelTotal>0?`${cmSafe} meses · reajustado pelo indexador`:"Não informado",sac:null,price:null,cons:aluguelTotal>0?aluguelTotal:null,hlMin:false},
+    {label:"Entrada / lance",sac:entrada,price:entrada,cons:ct.lanceEfetivo||0,hlMin:true},
+    {label:"FGTS utilizado",sac:fgts>0?fgts:null,price:fgts>0?fgts:null,cons:null,hlMin:false},
+    {label:"Valor financiado / carta de crédito",sub:"SAC e Price: imediato · Consórcio: carta na contemplação",sac:principal,price:principal,cons:ct.cartaTravada,hlMin:false},
+    {label:"Acesso ao imóvel",sac:"Mês 1",price:"Mês 1",cons:`Mês ${cmSafe} (estimativa)`,hlMin:false},
+  ];
+
+  return (
+    <div style={{background:C.panel,border:`1px solid ${C.border}`,borderRadius:16,
+      boxShadow:"0 2px 12px rgba(0,0,0,0.04)",marginBottom:20,overflow:"hidden"}}>
+
+      {/* Header clicável */}
+      <button onClick={()=>setOpen(o=>!o)} style={{width:"100%",background:"none",border:"none",
+        cursor:"pointer",padding:"16px 22px",display:"flex",alignItems:"center",
+        justifyContent:"space-between",fontFamily:F.body}}>
+        <div style={{display:"flex",alignItems:"center",gap:12,flexWrap:"wrap"}}>
+          <span style={{fontFamily:F.display,fontSize:17,fontWeight:700,color:C.text}}>
+            Detalhamento de custos
+          </span>
+          <span style={{fontSize:12,color:C.muted}}>
+            Juros · TR · Taxas · Indexador · Aluguel · Total desembolsado
+          </span>
+        </div>
+        <span style={{fontSize:18,color:C.muted,transition:"transform 0.2s",
+          transform:open?"rotate(180deg)":"rotate(0deg)"}}>▾</span>
+      </button>
+
+      {open&&(
+        <div style={{overflowX:"auto"}}>
+          <table cellPadding="0" style={{borderCollapse:"separate",borderSpacing:0,width:"100%",minWidth:560}}>
+            <thead>
+              <tr>
+                <th style={{...thS,textAlign:"left",width:"38%",padding:"10px 18px"}}>Indicador</th>
+                <th style={{...thS,color:C.sac}}>SAC</th>
+                <th style={{...thS,color:C.price}}>Price</th>
+                <th style={{...thS,color:C.cons}}>Consórcio</th>
+              </tr>
+            </thead>
+            <tbody>
+              {rows.map((row,ri)=>{
+                const nums=[row.sac,row.price,row.cons].filter(v=>typeof v==="number");
+                const minV=row.hlMin&&nums.length?Math.min(...nums):null;
+                return (
+                  <tr key={ri} style={{background:ri%2===0?"#fff":"#fafcfa"}}>
+                    <td style={{padding:"11px 18px",fontSize:13,color:C.text,
+                      borderBottom:`1px solid ${C.border}`,fontFamily:F.body}}>
+                      <div style={{fontWeight:500}}>{row.label}</div>
+                      {row.sub&&<div style={{fontSize:11,color:C.muted,marginTop:2}}>{row.sub}</div>}
+                    </td>
+                    {[{v:row.sac,color:C.sac},{v:row.price,color:C.price},{v:row.cons,color:C.cons}].map((item,j)=>{
+                      const isMin=row.hlMin&&typeof item.v==="number"&&item.v===minV;
+                      return (
+                        <td key={j} style={{padding:"11px 18px",fontSize:13,textAlign:"center",
+                          borderBottom:`1px solid ${C.border}`,fontFamily:F.body,
+                          background:isMin?C.accentHl:"transparent",whiteSpace:"nowrap"}}>
+                          {renderVal(item.v,item.color,row.hlMin,minV)}
+                        </td>
+                      );
+                    })}
+                  </tr>
+                );
+              })}
+
+              {/* Linha total destacada */}
+              {(()=>{
+                const vals=[sacTotal,priceTotal,consTotal];
+                const minV=Math.min(...vals);
+                const colors=[C.sac,C.price,C.cons];
+                return (
+                  <tr style={{background:C.accentBg}}>
+                    <td style={{padding:"14px 18px",fontSize:14,fontWeight:700,color:C.text,
+                      borderTop:`2px solid ${C.borderMid}`,fontFamily:F.body}}>
+                      Total desembolsado
+                      <div style={{fontSize:11,color:C.muted,fontWeight:400,marginTop:1}}>
+                        Parcelas + entrada / lance + aluguel
+                      </div>
+                    </td>
+                    {vals.map((v,i)=>(
+                      <td key={i} style={{padding:"14px 18px",fontSize:14,textAlign:"center",
+                        fontWeight:v===minV?700:500,color:v===minV?colors[i]:C.text,
+                        background:v===minV?C.accentHl:C.accentBg,
+                        borderTop:`2px solid ${C.borderMid}`,whiteSpace:"nowrap",fontFamily:F.body}}>
+                        {brl(v)}
+                      </td>
+                    ))}
+                  </tr>
+                );
+              })()}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ─── CENÁRIOS CONTEMPLAÇÃO COMPONENT ────────────────────────────────────────
+function CenariosContemplacao({cenarios,cmSafe}) {
+  const [open,setOpen]=useState(false);
+
+  return (
+    <div style={{background:C.panel,border:`1px solid ${C.border}`,borderRadius:16,
+      boxShadow:"0 2px 12px rgba(0,0,0,0.04)",marginBottom:20,overflow:"hidden"}}>
+
+      <button onClick={()=>setOpen(o=>!o)} style={{width:"100%",background:"none",
+        border:"none",cursor:"pointer",padding:"16px 22px",display:"flex",
+        alignItems:"center",justifyContent:"space-between",fontFamily:F.body}}>
+        <div style={{display:"flex",alignItems:"center",gap:12,flexWrap:"wrap"}}>
+          <span style={{fontFamily:F.display,fontSize:17,fontWeight:700,color:C.text}}>
+            Cenários de contemplação — Consórcio
+          </span>
+          <span style={{fontSize:12,color:C.muted}}>
+            Como os indicadores mudam dependendo de quando você for sorteado
+          </span>
+        </div>
+        <span style={{fontSize:18,color:C.muted,transition:"transform 0.2s",
+          transform:open?"rotate(180deg)":"rotate(0deg)"}}>▾</span>
+      </button>
+
+      {open&&(
+        <div>
+          <div style={{padding:"6px 20px 10px",borderBottom:`1px solid ${C.border}`}}>
+            <div style={{fontSize:12,color:C.muted,fontFamily:F.body}}>
+              Coluna destacada = mês selecionado nos inputs
+            </div>
+          </div>
+          <div style={{overflowX:"auto"}}>
+            <table cellPadding="0" style={{borderCollapse:"separate",borderSpacing:0,width:"100%",minWidth:400}}>
+              <thead>
+                <tr>
+                  <th style={{padding:"11px 16px",fontSize:11,fontWeight:700,textAlign:"left",color:C.muted,borderBottom:`1px solid ${C.border}`,background:C.soft,fontFamily:F.body,textTransform:"uppercase",letterSpacing:"0.07em"}}>Indicador</th>
+                  {cenarios.map(c=>(
+                    <th key={c.cm} style={{padding:"11px 16px",fontSize:11,fontWeight:700,textAlign:"center",borderBottom:`1px solid ${C.border}`,background:c.cm===cmSafe?C.accentBg:C.soft,fontFamily:F.body,textTransform:"uppercase",letterSpacing:"0.07em",color:c.cm===cmSafe?C.accent:C.muted}}>
+                      Mês {c.cm}{c.cm===cmSafe?" ✓":""}
+                    </th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                {[
+                  {label:"Carta reajustada",sub:"Valor do crédito recebido na contemplação",fn:c=>brl(c.cartaTravada)},
+                  {label:"Desembolso até a contemplação",sub:"Parcelas reajustadas · inclui carta + adm + fundo de reserva",fn:c=>brl(c.desembolsoPre)},
+                  {label:"Desembolso pós-contemplação",sub:"Parcelas reajustadas sobre o saldo devedor remanescente",fn:c=>brl(c.desembolsoPos)},
+                  {label:"Total desembolsado",sub:"Soma dos dois períodos + lance",fn:c=>brl(c.totalPaid),bold:true},
+                ].map((row,ri)=>(
+                  <tr key={ri} style={{background:ri%2===0?"#fff":"#fafcfa"}}>
+                    <td style={{padding:"11px 16px",fontSize:13,color:C.text,borderBottom:`1px solid ${C.border}`,fontFamily:F.body}}>
+                      <div style={{fontWeight:row.bold?700:500}}>{row.label}</div>
+                      {row.sub&&<div style={{fontSize:11,color:C.muted,marginTop:1}}>{row.sub}</div>}
+                    </td>
+                    {cenarios.map(c=>(
+                      <td key={c.cm} style={{
+                        padding:"11px 16px",fontSize:13,textAlign:"center",
+                        borderBottom:`1px solid ${C.border}`,fontFamily:F.body,
+                        background:c.cm===cmSafe?C.accentBg:"transparent",
+                        fontWeight:row.bold||c.cm===cmSafe?700:400,
+                        color:C.text,whiteSpace:"nowrap",
+                      }}>
+                        {row.fn(c)}
+                      </td>
+                    ))}
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
 // ─── APP ──────────────────────────────────────────────────────────────────────
 export default function App() {
   const [imovel,setImovel]=useState(500000);
@@ -802,171 +994,46 @@ export default function App() {
         })()}
 
         {/* DESTAQUES */}
-        <div className="sim-destaques" style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:16,marginBottom:24}}>
-          {[{title:"Total desembolsado",list:totaisList,min:minT,fmt:(v)=>brl(v)}].map((card,ci)=>(
-            <div key={ci} style={{background:C.panel,border:`1px solid ${C.border}`,borderRadius:16,padding:20,boxShadow:"0 2px 12px rgba(0,0,0,0.04)"}}>
-              <div style={{fontSize:11,fontWeight:700,color:C.muted,textTransform:"uppercase",letterSpacing:"0.08em",marginBottom:14,fontFamily:F.body}}>{card.title}</div>
-              <div className="sim-hl-cols" style={{display:"flex",gap:10}}>
-                {card.list.map((t,i)=>(
-                  <div key={i} style={{flex:1,borderRadius:12,padding:"14px 10px",textAlign:"center",background:t.value===card.min?C.accentBg:"#fafcfa",border:`1.5px solid ${t.value===card.min?C.accent:C.border}`}}>
-                    <div style={{fontSize:11,fontWeight:700,color:t.color,marginBottom:6,textTransform:"uppercase",letterSpacing:"0.06em",fontFamily:F.body}}>{t.label}</div>
-                    <div style={{fontSize:18,fontWeight:700,color:t.value===card.min?C.accent:C.text,fontFamily:F.display,lineHeight:1.1}}>{card.fmt(t.value)}</div>
-                    {t.value===card.min&&<div style={{fontSize:10,color:C.accent,marginTop:5,fontWeight:700}}>✓ menor</div>}
+        <div style={{background:C.panel,border:`1px solid ${C.border}`,borderRadius:16,padding:20,boxShadow:"0 2px 12px rgba(0,0,0,0.04)",marginBottom:24}}>
+          <div style={{fontSize:11,fontWeight:700,color:C.muted,textTransform:"uppercase",letterSpacing:"0.08em",marginBottom:14,fontFamily:F.body}}>Total desembolsado</div>
+          <div className="sim-hl-cols" style={{display:"flex",gap:12}}>
+            {[
+              {label:"SAC",value:sacTotal,color:C.sac,pFirst:st.installFirst,pLast:st.installLast},
+              {label:"Price",value:priceTotal,color:C.price,pFirst:pt.installFirst,pLast:pt.installLast},
+              {label:"Consórcio",value:consTotal,color:C.cons,pFirst:ct.installFirst,pLast:ct.installLast},
+            ].map((t,i)=>{
+              const isMin=t.value===minT;
+              return (
+                <div key={i} style={{flex:1,borderRadius:12,padding:"16px 14px",textAlign:"center",background:isMin?C.accentBg:"#fafcfa",border:`1.5px solid ${isMin?C.accent:C.border}`}}>
+                  <div style={{fontSize:11,fontWeight:700,color:t.color,marginBottom:8,textTransform:"uppercase",letterSpacing:"0.06em",fontFamily:F.body}}>{t.label}</div>
+                  <div style={{fontSize:22,fontWeight:700,color:isMin?C.accent:C.text,fontFamily:F.display,lineHeight:1.1}}>{brl(t.value)}</div>
+                  {isMin&&<div style={{fontSize:10,color:C.accent,marginTop:5,fontWeight:700}}>✓ menor</div>}
+                  <div style={{marginTop:12,paddingTop:10,borderTop:`1px solid ${isMin?C.borderMid:C.border}`}}>
+                    <div style={{display:"flex",justifyContent:"space-between",fontSize:12,fontFamily:F.body,marginBottom:4}}>
+                      <span style={{color:C.muted}}>Parcela inicial</span>
+                      <span style={{fontWeight:500,color:C.text}}>{brl(t.pFirst)}</span>
+                    </div>
+                    <div style={{display:"flex",justifyContent:"space-between",fontSize:12,fontFamily:F.body}}>
+                      <span style={{color:C.muted}}>Parcela final</span>
+                      <span style={{fontWeight:500,color:C.text}}>{brl(t.pLast)}</span>
+                    </div>
                   </div>
-                ))}
-              </div>
-            </div>
-          ))}
-        </div>
-
-
-        {/* CENÁRIOS DE CONTEMPLAÇÃO */}
-        <div style={{background:C.panel,border:`1px solid ${C.border}`,borderRadius:16,boxShadow:"0 2px 12px rgba(0,0,0,0.04)",marginBottom:20,overflow:"hidden"}}>
-          <div style={{padding:"14px 20px 10px",borderBottom:`1px solid ${C.border}`,display:"flex",alignItems:"center",justifyContent:"space-between"}}>
-            <div>
-              <div style={{fontFamily:F.display,fontSize:16,fontWeight:700,color:C.text}}>Cenários de contemplação — Consórcio</div>
-              <div style={{fontSize:12,color:C.muted,marginTop:2,fontFamily:F.body}}>Como os indicadores mudam dependendo de quando você for sorteado · coluna destacada = mês selecionado nos inputs</div>
-            </div>
-          </div>
-          <div style={{overflowX:"auto"}}>
-            <table cellPadding="0" style={{borderCollapse:"separate",borderSpacing:0,width:"100%",minWidth:400}}>
-              <thead>
-                <tr>
-                  <th style={{padding:"11px 16px",fontSize:11,fontWeight:700,textAlign:"left",color:C.muted,borderBottom:`1px solid ${C.border}`,background:C.soft,fontFamily:F.body,textTransform:"uppercase",letterSpacing:"0.07em"}}>Indicador</th>
-                  {cenarios.map(c=>(
-                    <th key={c.cm} style={{padding:"11px 16px",fontSize:11,fontWeight:700,textAlign:"center",borderBottom:`1px solid ${C.border}`,background:c.cm===cmSafe?C.accentBg:C.soft,fontFamily:F.body,textTransform:"uppercase",letterSpacing:"0.07em",color:c.cm===cmSafe?C.accent:C.muted}}>
-                      Mês {c.cm}{c.cm===cmSafe?" ✓":""}
-                    </th>
-                  ))}
-                </tr>
-              </thead>
-              <tbody>
-                {[
-                  {
-                    label:"Carta reajustada",
-                    sub:"Valor do crédito recebido na contemplação",
-                    fn:c=>brl(c.cartaTravada),
-                    numFn:null,
-                  },
-                  {
-                    label:"Desembolso até a contemplação",
-                    sub:"Parcelas reajustadas · inclui carta + adm + fundo de reserva",
-                    fn:c=>brl(c.desembolsoPre),
-                    numFn:c=>c.desembolsoPre,
-                    hlMin:true,
-                  },
-                  {
-                    label:"Desembolso pós-contemplação",
-                    sub:"Parcelas reajustadas sobre o saldo devedor remanescente",
-                    fn:c=>brl(c.desembolsoPos),
-                    numFn:c=>c.desembolsoPos,
-                    hlMin:true,
-                  },
-                  {
-                    label:"Total desembolsado",
-                    sub:"Soma dos dois períodos + lance",
-                    fn:c=>brl(c.totalPaid),
-                    numFn:c=>c.totalPaid,
-                    hlMin:true,
-                    bold:true,
-                  },
-                ].map((row,ri)=>{
-                  const vals=cenarios.map(c=>row.fn(c));
-                  const numVals=row.numFn?cenarios.map(c=>row.numFn(c)):[];
-                  const minV=row.hlMin&&numVals.length?Math.min(...numVals):null;
-                  return (
-                    <tr key={ri} style={{background:ri%2===0?"#fff":"#fafcfa"}}>
-                      <td style={{padding:"11px 16px",fontSize:13,color:C.text,borderBottom:`1px solid ${C.border}`,fontFamily:F.body}}>
-                        <div style={{fontWeight:row.bold?700:500}}>{row.label}</div>
-                        {row.sub&&<div style={{fontSize:11,color:C.muted,marginTop:1}}>{row.sub}</div>}
-                      </td>
-                      {cenarios.map((c,ci)=>{
-                        const numVal=row.numFn?row.numFn(c):null;
-                        const isSelected=c.cm===cmSafe;
-                        return (
-                          <td key={c.cm} style={{
-                            padding:"11px 16px",fontSize:13,textAlign:"center",
-                            borderBottom:`1px solid ${C.border}`,fontFamily:F.body,
-                            background:isSelected?C.accentBg:"transparent",
-                            fontWeight:row.bold||isSelected?700:400,
-                            color:C.text,whiteSpace:"nowrap",
-                          }}>
-                            {vals[ci]}
-                          </td>
-                        );
-                      })}
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
+                </div>
+              );
+            })}
           </div>
         </div>
 
-        {/* TABELA */}
-        <div style={{background:C.panel,border:`1px solid ${C.border}`,borderRadius:16,boxShadow:"0 2px 12px rgba(0,0,0,0.04)",marginBottom:20,overflow:"hidden"}}>
-          <div style={{padding:"18px 20px 14px",borderBottom:`1px solid ${C.border}`}}>
-            <div style={{fontFamily:F.display,fontSize:18,fontWeight:700,color:C.text}}>Resultado comparativo</div>
-            <div style={{fontSize:12,color:C.muted,marginTop:2,fontFamily:F.body}}>Verde = menor valor na linha</div>
-          </div>
-          <div style={{overflowX:"auto"}}>
-            <table cellPadding="0" style={{borderCollapse:"separate",borderSpacing:0,width:"100%",minWidth:560}}>
-              <thead>
-                <tr>
-                  <th style={{...thCol(C.muted),textAlign:"left",width:"34%"}}>Indicador</th>
-                  <th style={thCol(C.sac)}>SAC</th>
-                  <th style={thCol(C.price)}>Price</th>
-                  <th style={thCol(C.cons)}>Consórcio</th>
-                </tr>
-              </thead>
-              <tbody>
-                <SectionHeader label="Parcelas"/>
-                <Row label="Parcela inicial" sac={st.installFirst} price={pt.installFirst} cons={ct.installFirst} hlMin even={false}/>
-                <Row label="Parcela final"   sac={st.installLast}  price={pt.installLast}  cons={ct.installLast}  hlMin even/>
 
-                <SectionHeader label="Custos"/>
-                <Row label="Juros + seguros + taxas (CET)" sub="Custo Efetivo Total contratado" sac={st.totalInterest} price={pt.totalInterest} cons={null} even={false}/>
-                <Row label="TR" sac={st.totalTR} price={pt.totalTR} cons={null} even/>
-                <Row label="Taxa de administração" sac={null} price={null} cons={ct.totalAdm} even={false}/>
-                <Row label="Fundo de reserva" sub="Pode ser devolvido ao final se houver saldo" sac={null} price={null} cons={ct.totalFundo} even/>
-                <Row label="Indexador pré-contemplação" sub="Carta e parcela crescem juntas" sac={null} price={null} cons={ct.totalIdxPre} even={false}/>
-                <Row label="Indexador pós-contemplação" sub="Carta travada, parcela ainda cresce — custo puro" sac={null} price={null} cons={ct.totalIdxPos} even/>
 
-                <SectionHeader label="Desembolso total"/>
-                <Row label="Amortização" sub="Capital devolvido ao imóvel" sac={st.totalAmort} price={pt.totalAmort} cons={ct.totalAmort} even={false}/>
-                <Row label="Juros + seguros + taxas" sac={st.totalInterest} price={pt.totalInterest} cons={null} even/>
-                <Row label="TR paga" sac={st.totalTR} price={pt.totalTR} cons={null} even={false}/>
-                <Row label="Taxa de administração" sac={null} price={null} cons={ct.totalAdm} even/>
-                <Row label="Fundo de reserva" sac={null} price={null} cons={ct.totalFundo} even={false}/>
-                <Row label="Indexador total" sac={null} price={null} cons={(ct.totalIdxPre||0)+(ct.totalIdxPos||0)} even/>
-                <Row label="Entrada / lance" sac={entrada} price={entrada} cons={ct.lanceEfetivo} even={false}/>
-                <Row label="FGTS utilizado" sub="Reduz o principal financiado" sac={fgts>0?fgts:null} price={fgts>0?fgts:null} cons={null} even/>
-                <Row label="Aluguel durante espera" sub={aluguelTotal>0?`${cmSafe} meses · reajustado pelo indexador`:"Não informado"} sac={null} price={null} cons={aluguelTotal>0?aluguelTotal:null} even={false}/>
 
-                {(()=>{
-                  const vals=[sacTotal,priceTotal,consTotal];
-                  const minV=Math.min(...vals);
-                  const colors=[C.sac,C.price,C.cons];
-                  return (
-                    <tr style={{background:C.accentBg}}>
-                      <td style={{padding:"14px 18px",fontSize:14,fontWeight:700,color:C.text,borderBottom:`1px solid ${C.borderMid}`,borderTop:`2px solid ${C.borderMid}`,fontFamily:F.body}}>
-                        Total desembolsado
-                        <div style={{fontSize:11,color:C.muted,fontWeight:400,marginTop:1}}>Parcelas + entrada / lance + aluguel</div>
-                      </td>
-                      {vals.map((v,i)=>(
-                        <td key={i} style={{padding:"14px 18px",fontSize:14,textAlign:"center",fontWeight:v===minV?700:500,color:v===minV?colors[i]:C.text,background:v===minV?C.accentHl:C.accentBg,borderBottom:`1px solid ${C.borderMid}`,borderTop:`2px solid ${C.borderMid}`,whiteSpace:"nowrap",fontFamily:F.body}}>{brl(v)}</td>
-                      ))}
-                    </tr>
-                  );
-                })()}
-
-                <SectionHeader label="Crédito recebido"/>
-                <Row label="Valor financiado / carta de crédito" sub="SAC e Price: imediato · Consórcio: carta reajustada na contemplação" sac={principal} price={principal} cons={ct.cartaTravada} even={false}/>
-                <Row label="Acesso ao imóvel" sac="Mês 1" price="Mês 1" cons={`Mês ${cmSafe} (estimativa)`} even/>
-              </tbody>
-            </table>
-          </div>
-        </div>
+        {/* CUSTOS DETALHADOS */}
+        <CustosDetalhados
+          st={st} pt={pt} ct={ct}
+          sacTotal={sacTotal} priceTotal={priceTotal} consTotal={consTotal}
+          principal={principal} entrada={entrada} fgts={fgts}
+          aluguelTotal={aluguelTotal} cmSafe={cmSafe}
+        />
 
         {/* GRÁFICOS */}
         <ChartCard title="Evolução das parcelas" subtitle="Parcela mensal em cada modalidade ao longo do tempo.">
@@ -1019,6 +1086,9 @@ export default function App() {
 
         {/* FLUXO DE CAIXA */}
         <FluxoCaixa sac={sac} price={price} cons={cons} cmSafe={cmSafe} entrada={entrada} fgts={fgts} lance={ct.lanceEfetivo||0} aluguelPorMes={aluguelPorMes}/>
+
+        {/* CENÁRIOS DE CONTEMPLAÇÃO */}
+        <CenariosContemplacao cenarios={cenarios} cmSafe={cmSafe}/>
 
         {/* NOTA */}
         <div style={{background:C.goldBg,border:"1px solid #e8d48a",borderRadius:12,padding:"14px 18px",fontSize:12,color:"#6b4f10",lineHeight:1.7,fontFamily:F.body}}>
