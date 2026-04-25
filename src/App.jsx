@@ -69,6 +69,21 @@ function calcSac(principal,rM,trM,months) {
   return {rows,totals:{installFirst:rows[0].installment,installLast:last.installment,totalInterest:last.cumInterest,totalTR:last.cumTR,totalAmort:principal,totalPaid:last.cumInstall}};
 }
 
+// ─── CALC: PRICE ──────────────────────────────────────────────────────────────
+function calcPrice(principal,rM,trM,months) {
+  if(principal<=0||months<=0) return {rows:[],totals:{}};
+  let bal=principal,cumInstall=0,cumInterest=0,cumTR=0,cumAmort=0;
+  const rows=Array.from({length:months},(_,i)=>{
+    const remaining=months-i; const tr=bal*trM; bal+=tr;
+    const installment=pmtFn(bal,rM,remaining); const interest=bal*rM;
+    const amort=Math.max(installment-interest,0); bal=Math.max(bal-amort,0);
+    cumInstall+=installment; cumInterest+=interest; cumTR+=tr; cumAmort+=amort;
+    return {month:i+1,installment,interest,tr,amort,bal,cumInstall,cumInterest,cumTR,cumAmort};
+  });
+  const last=rows[rows.length-1];
+  return {rows,totals:{installFirst:rows[0].installment,installLast:last.installment,totalInterest:last.cumInterest,totalTR:last.cumTR,totalAmort:principal,totalPaid:last.cumInstall}};
+}
+
 // ─── CALC: SAC COM AMORTIZAÇÃO EXTRAORDINÁRIA ─────────────────────────────────
 function calcSacAmort(principal,rM,trM,months,amortMensal,amortAnual,mesAnual,efeito) {
   if(principal<=0||months<=0) return {rows:[],totals:{}};
@@ -120,7 +135,7 @@ function calcPriceAmort(principal,rM,trM,months,amortMensal,amortAnual,mesAnual,
     const m=i+1;
     if(bal<=0.01){
       if(efeito==="prazo") break;
-      rows.push({month:m,installment:null,interest:0,tr:0,amort:0,amortExtra:0,bal:0,cumInstall,cumInterest,cumTR,cumAmortExtra});
+      rows.push({month:m,installment:0,interest:0,tr:0,amort:0,amortExtra:0,bal:0,cumInstall,cumInterest,cumTR,cumAmortExtra});
       rem=Math.max(rem-1,1);
       continue;
     }
