@@ -78,7 +78,7 @@ function calcSacAmort(principal,rM,trM,months,amortMensal,amortAnual,mesAnual,ef
     const m=i+1, rem=months-i;
     if(bal<=0.01){
       if(efeito==="prazo") break;
-      rows.push({month:m,installment:null,interest:0,tr:0,amort:0,amortExtra:0,bal:0,cumInstall,cumInterest,cumTR,cumAmortExtra});
+      rows.push({month:m,installment:0,interest:0,tr:0,amort:0,amortExtra:0,bal:0,cumInstall,cumInterest,cumTR,cumAmortExtra});
       continue;
     }
     const tr=bal*trM; bal+=tr;
@@ -1058,11 +1058,11 @@ export default function App() {
   // Chart parcelas com amort
   const chartParcelasEx=useMemo(()=>Array.from({length:maxM},(_,i)=>({
     month:i+1,
-    SAC:sac.rows[i]?.installment||null,
-    Price:price.rows[i]?.installment||null,
-    "Consórcio":cons.rows[i]?.installment||null,
-    "SAC+":sacAmort?.rows[i]?.installment||null,
-    "Price+":priceAmort?.rows[i]?.installment||null,
+    SAC:sac.rows[i]?.installment>0?sac.rows[i].installment:null,
+    Price:price.rows[i]?.installment>0?price.rows[i].installment:null,
+    "Consórcio":cons.rows[i]?.installment>0?cons.rows[i].installment:null,
+    "SAC+":sacAmort?.rows[i]?.installment>0?sacAmort.rows[i].installment:null,
+    "Price+":priceAmort?.rows[i]?.installment>0?priceAmort.rows[i].installment:null,
   })),[sac.rows,price.rows,cons.rows,sacAmort,priceAmort,maxM]);
 
   const chartDesembolsoEx=useMemo(()=>{
