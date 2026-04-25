@@ -57,9 +57,9 @@ function calcSac(principal,rM,trM,months) {
   let bal=principal,cumInstall=0,cumInterest=0,cumTR=0,cumAmort=0;
   const rows=Array.from({length:months},(_,i)=>{
     const remaining=months-i;
-    const tr=bal*trM; bal+=tr;           // corrige saldo pela TR
-    const amort=bal/remaining;           // amort = saldo corrigido / meses restantes
-    const interest=bal*rM;              // juros sobre saldo corrigido
+    const tr=bal*trM; bal+=tr;
+    const amort=bal/remaining;
+    const interest=bal*rM;
     const installment=amort+interest;
     bal=Math.max(bal-amort,0);
     cumInstall+=installment; cumInterest+=interest; cumTR+=tr; cumAmort+=amort;
@@ -67,6 +67,61 @@ function calcSac(principal,rM,trM,months) {
   });
   const last=rows[rows.length-1];
   return {rows,totals:{installFirst:rows[0].installment,installLast:last.installment,totalInterest:last.cumInterest,totalTR:last.cumTR,totalAmort:principal,totalPaid:last.cumInstall}};
+}
+
+// ─── CALC: SAC COM AMORTIZAÇÃO EXTRAORDINÁRIA ─────────────────────────────────
+/**
+ * amortMensal: valor extra pago todo mês
+ * amortAnual: valor extra pago 1x por ano
+ * mesAnual: mês do ano em que ocorre (1-12)
+ * efeito: "prazo" | "parcela"
+ */
+function calcSacAmort(principal,rM,trM,months,amortMensal,amortAnual,mesAnual,efeito) {
+  if(principal<=0||months<=0) return {rows:[],totals:{}};
+  let bal=principal,cumInstall=0,cumInterest=0,cumTR=0,cumAmort=0,cumAmortExtra=0;
+  const rows=[];
+  let mesesRestantes=months;
+
+  for(let i=0;i<months;i++){
+    if(bal<=0) break;
+    const m=i+1;
+    const tr=bal*trM; bal+=tr;
+    const amortBase=efeito==="prazo"
+      ? bal/mesesRestantes   // parcela fixa, prazo reduz
+      : bal/mesesRestantes;  // recalcula sobre saldo atual
+    const interest=bal*rM;
+    const installment=amortBase+interest;
+    bal=Math.max(bal-amortBase,0);
+
+    // Amortização extraordinária
+    const isAnual=amortAnual>0&&(m%12===mesAnual%12);
+    const extraTotal=(amortMensal||0)+(isAnual?amortAnual:0);
+    const extraEfetivo=Math.min(extraTotal,bal);
+    bal=Math.max(bal-extraEfetivo,0);
+
+    if(efeito==="parcela") mesesRestantes=Math.max(mesesRestantes-1,1);
+    else if(extraEfetivo>0) mesesRestantes=Math.max(mesesRestantes-1,1); // prazo reduz
+
+    cumInstall+=installment; cumInterest+=interest; cumTR+=tr;
+    cumAmort+=amortBase; cumAmortExtra+=extraEfetivo;
+    rows.push({month:m,installment,interest,tr,amort:amortBase,amortExtra:extraEfetivo,bal,cumInstall,cumInterest,cumTR,cumAmort,cumAmortExtra});
+  }
+
+  const last=rows[rows.length-1]||{};
+  return {
+    rows,
+    totals:{
+      installFirst:rows[0]?.installment||0,
+      installLast:last.installment||0,
+      totalInterest:last.cumInterest||0,
+      totalTR:last.cumTR||0,
+      totalAmort:principal,
+      totalPaid:(last.cumInstall||0)+(last.cumAmortExtra||0),
+      totalAmortExtra:last.cumAmortExtra||0,
+      prazoEfetivo:rows.length,
+      mesesEconomizados:months-rows.length,
+    }
+  };
 }
 
 // ─── CALC: PRICE ──────────────────────────────────────────────────────────────
@@ -82,6 +137,56 @@ function calcPrice(principal,rM,trM,months) {
   });
   const last=rows[rows.length-1];
   return {rows,totals:{installFirst:rows[0].installment,installLast:last.installment,totalInterest:last.cumInterest,totalTR:last.cumTR,totalAmort:principal,totalPaid:last.cumInstall}};
+}
+
+// ─── CALC: PRICE COM AMORTIZAÇÃO EXTRAORDINÁRIA ───────────────────────────────
+function calcPriceAmort(principal,rM,trM,months,amortMensal,amortAnual,mesAnual,efeito) {
+  if(principal<=0||months<=0) return {rows:[],totals:{}};
+  let bal=principal,cumInstall=0,cumInterest=0,cumTR=0,cumAmort=0,cumAmortExtra=0;
+  const rows=[];
+  let mesesRestantes=months;
+
+  for(let i=0;i<months;i++){
+    if(bal<=0) break;
+    const m=i+1;
+    const tr=bal*trM; bal+=tr;
+    const installment=pmtFn(bal,rM,mesesRestantes);
+    const interest=bal*rM;
+    const amort=Math.max(installment-interest,0);
+    bal=Math.max(bal-amort,0);
+
+    // Amortização extraordinária
+    const isAnual=amortAnual>0&&(m%12===mesAnual%12);
+    const extraTotal=(amortMensal||0)+(isAnual?amortAnual:0);
+    const extraEfetivo=Math.min(extraTotal,bal);
+    bal=Math.max(bal-extraEfetivo,0);
+
+    // Efeito: prazo = não recalcula parcela; parcela = recalcula no próximo mês
+    if(efeito==="prazo"&&extraEfetivo>0) {
+      // prazo reduz — não faz nada, loop para quando bal=0
+    }
+    mesesRestantes=Math.max(mesesRestantes-1,1);
+
+    cumInstall+=installment; cumInterest+=interest; cumTR+=tr;
+    cumAmort+=amort; cumAmortExtra+=extraEfetivo;
+    rows.push({month:m,installment,interest,tr,amort,amortExtra:extraEfetivo,bal,cumInstall,cumInterest,cumTR,cumAmort,cumAmortExtra});
+  }
+
+  const last=rows[rows.length-1]||{};
+  return {
+    rows,
+    totals:{
+      installFirst:rows[0]?.installment||0,
+      installLast:last.installment||0,
+      totalInterest:last.cumInterest||0,
+      totalTR:last.cumTR||0,
+      totalAmort:principal,
+      totalPaid:(last.cumInstall||0)+(last.cumAmortExtra||0),
+      totalAmortExtra:last.cumAmortExtra||0,
+      prazoEfetivo:rows.length,
+      mesesEconomizados:months-rows.length,
+    }
+  };
 }
 
 // ─── CALC: CONSÓRCIO ──────────────────────────────────────────────────────────
@@ -493,7 +598,7 @@ function HistoricoTabela({sac,price,cons,cmSafe,carta,admin,fundo,prazoCons}) {
 
 
 // ─── FLUXO DE CAIXA COMPONENT ────────────────────────────────────────────────
-function FluxoCaixa({sac,price,cons,cmSafe,entrada,fgts,lance,aluguelPorMes}) {
+function FluxoCaixa({sac,price,cons,cmSafe,entrada,fgts,lance,aluguelPorMes,sacAmort,priceAmort,amortAtiva,amortMesAnual}) {
   const [open,setOpen]=useState(false);
   const [modo,setModo]=useState("anual");
 
@@ -574,6 +679,7 @@ function FluxoCaixa({sac,price,cons,cmSafe,entrada,fgts,lance,aluguelPorMes}) {
                   <th style={{...thS,color:C.sac}}>SAC</th>
                   <th style={{...thS,color:C.price}}>Price</th>
                   <th style={{...thS,color:C.cons}}>Consórcio</th>
+                  {amortAtiva&&<th style={{...thS,color:C.sac}}>Amort. Extra</th>}
                   <th style={{...thS}}>Menor</th>
                 </tr>
               </thead>
@@ -638,6 +744,16 @@ function FluxoCaixa({sac,price,cons,cmSafe,entrada,fgts,lance,aluguelPorMes}) {
                           </span>
                         )}
                       </td>
+                      {amortAtiva&&(()=>{
+                        const sacEx=sacAmort?.rows[m-1]?.amortExtra||0;
+                        const priceEx=priceAmort?.rows[m-1]?.amortExtra||0;
+                        const extra=Math.max(sacEx,priceEx);
+                        return (
+                          <td style={tdN(extra,extra>0,extra>0?C.sac:C.muted,extra>0?"#eff6ff":rowBg)}>
+                            {extra>0?<><strong>{brl(extra)}</strong><br/><span style={{fontSize:10,color:C.muted}}>amort. extra</span></>:<span style={{color:C.border}}>—</span>}
+                          </td>
+                        );
+                      })()}
                     </tr>
                   );
                 })}
@@ -863,6 +979,13 @@ export default function App() {
   const [promoDesc,setPromoDesc]=useState(0);
   const [promoMeses,setPromoMeses]=useState(0);
 
+  // Amortizações extraordinárias
+  const [amortAtiva,setAmortAtiva]=useState(false);
+  const [amortMensal,setAmortMensal]=useState(0);
+  const [amortAnual,setAmortAnual]=useState(0);
+  const [amortMesAnual,setAmortMesAnual]=useState(12);
+  const [amortEfeito,setAmortEfeito]=useState("prazo"); // "prazo" | "parcela"
+
   const rM=useMemo(()=>annualToMonthly(juros),[juros]);
   const trM=useMemo(()=>annualToMonthly(trAnual),[trAnual]);
   const idxM=useMemo(()=>annualToMonthly(idxAnual),[idxAnual]);
@@ -872,6 +995,9 @@ export default function App() {
   const sac=useMemo(()=>calcSac(principal,rM,trM,prazoFin),[principal,rM,trM,prazoFin]);
   const price=useMemo(()=>calcPrice(principal,rM,trM,prazoFin),[principal,rM,trM,prazoFin]);
   const cons=useMemo(()=>calcConsorcio(carta,prazoCons,admin/100,fundo/100,idxM,cmSafe,lance,promoDesc/100,promoMeses),[carta,prazoCons,admin,fundo,idxM,cmSafe,lance,promoDesc,promoMeses]);
+
+  const sacAmort=useMemo(()=>amortAtiva?calcSacAmort(principal,rM,trM,prazoFin,amortMensal,amortAnual,amortMesAnual,amortEfeito):null,[principal,rM,trM,prazoFin,amortMensal,amortAnual,amortMesAnual,amortEfeito,amortAtiva]);
+  const priceAmort=useMemo(()=>amortAtiva?calcPriceAmort(principal,rM,trM,prazoFin,amortMensal,amortAnual,amortMesAnual,amortEfeito):null,[principal,rM,trM,prazoFin,amortMensal,amortAnual,amortMesAnual,amortEfeito,amortAtiva]);
 
   const st=sac.totals,pt=price.totals,ct=cons.totals;
   const aluguelMensal=Number(aluguel)||0;
@@ -927,6 +1053,70 @@ export default function App() {
   const totaisList=[{label:"SAC",value:sacTotal,color:C.sac},{label:"Price",value:priceTotal,color:C.price},{label:"Consórcio",value:consTotal,color:C.cons}];
   const minT=Math.min(...totaisList.map(t=>t.value));
 
+  // Toggle de visibilidade das linhas nos gráficos
+  const [visibleLines,setVisibleLines]=useState({SAC:true,Price:true,"Consórcio":true,"SAC+":true,"Price+":true});
+  const toggleLine=(name)=>setVisibleLines(v=>({...v,[name]:!v[name]}));
+
+  // Legenda customizada clicável
+  const CustomLegend=({payload})=>(
+    <div style={{display:"flex",justifyContent:"center",gap:20,marginTop:8,flexWrap:"wrap"}}>
+      {payload.map((p,i)=>{
+        const active=visibleLines[p.value];
+        const isDashed=p.value==="SAC+"||p.value==="Price+";
+        return (
+          <div key={i} onClick={()=>toggleLine(p.value)}
+            style={{display:"flex",alignItems:"center",gap:6,cursor:"pointer",
+              opacity:active?1:0.35,transition:"opacity 0.2s",userSelect:"none"}}>
+            <svg width="24" height="4" style={{flexShrink:0}}>
+              <line x1="0" y1="2" x2="24" y2="2" stroke={p.color} strokeWidth="2.5"
+                strokeDasharray={isDashed?"6 3":"none"} strokeLinecap="round"/>
+            </svg>
+            <span style={{fontSize:12,fontFamily:F.body,color:active?C.text:C.muted,
+              fontWeight:active?500:400,textDecoration:active?"none":"line-through"}}>
+              {p.value}{isDashed?" (c/ amort.)":""}
+            </span>
+          </div>
+        );
+      })}
+    </div>
+  );
+
+  // Chart saldo devedor
+  const chartSaldo=useMemo(()=>Array.from({length:maxM},(_,i)=>({
+    month:i+1,
+    SAC:sac.rows[i]?sac.rows[i].bal:null,
+    Price:price.rows[i]?price.rows[i].bal:null,
+    "SAC+":sacAmort?.rows[i]?sacAmort.rows[i].bal:null,
+    "Price+":priceAmort?.rows[i]?priceAmort.rows[i].bal:null,
+  })),[sac.rows,price.rows,sacAmort,priceAmort,maxM]);
+
+  // Chart parcelas com amort
+  const chartParcelasEx=useMemo(()=>Array.from({length:maxM},(_,i)=>({
+    month:i+1,
+    SAC:sac.rows[i]?.installment??null,
+    Price:price.rows[i]?.installment??null,
+    "Consórcio":cons.rows[i]?.installment??null,
+    "SAC+":sacAmort?.rows[i]?.installment??null,
+    "Price+":priceAmort?.rows[i]?.installment??null,
+  })),[sac.rows,price.rows,cons.rows,sacAmort,priceAmort,maxM]);
+
+  const chartDesembolsoEx=useMemo(()=>{
+    let ac=0;
+    return Array.from({length:maxM},(_,i)=>{
+      if(i<aluguelPorMes.length) ac+=aluguelPorMes[i];
+      const sacAcum=sacAmort?.rows[i]?(sacAmort.rows[i].cumInstall+sacAmort.rows[i].cumAmortExtra+entrada+fgts):null;
+      const priceAcum=priceAmort?.rows[i]?(priceAmort.rows[i].cumInstall+priceAmort.rows[i].cumAmortExtra+entrada+fgts):null;
+      return {
+        month:i+1,
+        SAC:sac.rows[i]?sac.rows[i].cumInstall+entrada+fgts:null,
+        Price:price.rows[i]?price.rows[i].cumInstall+entrada+fgts:null,
+        "Consórcio":cons.rows[i]?cons.rows[i].cumInstall+ac:null,
+        "SAC+":sacAcum,
+        "Price+":priceAcum,
+      };
+    });
+  },[sac.rows,price.rows,cons.rows,sacAmort,priceAmort,maxM,entrada,fgts,aluguelPorMes]);
+
   return (
     <div style={{background:C.bg,minHeight:"100vh",fontFamily:F.body}}>
 
@@ -950,6 +1140,44 @@ export default function App() {
             <InputPct   label="CET anual"        value={juros}   onChange={setJuros} hint={`Financia ${brl(principal)} · inclui juros, seguros e taxas`}/>
             <InputPct   label="TR anual"         value={trAnual} onChange={setTrAnual}/>
             <InputInt   label="Prazo (meses)"    value={prazoFin} onChange={setPrazoFin}/>
+            {/* AMORTIZAÇÕES EXTRAORDINÁRIAS */}
+            <div style={{borderTop:`1px solid ${C.border}`,paddingTop:12,marginTop:2}}>
+              <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:10}}>
+                <div style={{fontSize:11,fontWeight:700,color:C.muted,textTransform:"uppercase",letterSpacing:"0.07em"}}>Amortizações extraordinárias</div>
+                <button onClick={()=>setAmortAtiva(a=>!a)} style={{padding:"4px 12px",borderRadius:8,border:`1.5px solid ${amortAtiva?C.sac:C.border}`,background:amortAtiva?"#eff6ff":"#fff",color:amortAtiva?C.sac:C.muted,fontFamily:F.body,fontSize:11,fontWeight:700,cursor:"pointer"}}>
+                  {amortAtiva?"Ativado ✓":"Ativar"}
+                </button>
+              </div>
+              {amortAtiva&&(
+                <div style={{display:"flex",flexDirection:"column",gap:12}}>
+                  <InputMoney label="Complemento mensal" value={amortMensal} onChange={setAmortMensal} hint="Valor extra pago todo mês além da parcela"/>
+                  <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10}}>
+                    <InputMoney label="Amortização anual" value={amortAnual} onChange={setAmortAnual} hint="1x por ano"/>
+                    <InputInt   label="Mês do pagamento" value={amortMesAnual} onChange={setAmortMesAnual} hint="1=jan · 12=dez"/>
+                  </div>
+                  <div>
+                    <div style={{fontSize:12,fontWeight:600,color:C.muted,marginBottom:6,textTransform:"uppercase",letterSpacing:"0.07em"}}>Efeito da amortização</div>
+                    <div style={{display:"flex",gap:8}}>
+                      {[{v:"prazo",label:"Reduz o prazo"},{ v:"parcela",label:"Reduz a parcela"}].map(op=>(
+                        <button key={op.v} onClick={()=>setAmortEfeito(op.v)} style={{flex:1,padding:"8px 10px",borderRadius:8,border:`1.5px solid ${amortEfeito===op.v?C.sac:C.border}`,background:amortEfeito===op.v?"#eff6ff":"#fff",color:amortEfeito===op.v?C.sac:C.muted,fontFamily:F.body,fontSize:12,fontWeight:600,cursor:"pointer",transition:"all 0.15s"}}>
+                          {op.label}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                  {/* Resumo do impacto */}
+                  {sacAmort&&(
+                    <div style={{background:C.soft,borderRadius:8,padding:"10px 12px",fontSize:12,fontFamily:F.body,lineHeight:1.8}}>
+                      <div style={{fontWeight:700,color:C.sac,marginBottom:4}}>Impacto SAC+</div>
+                      {amortEfeito==="prazo"
+                        ?<><span style={{color:C.muted}}>Prazo:</span> <strong>{sacAmort.totals.prazoEfetivo} meses</strong> <span style={{color:C.accent}}>(-{sacAmort.totals.mesesEconomizados} meses)</span><br/></>
+                        :<><span style={{color:C.muted}}>Parcela final:</span> <strong>{brl(sacAmort.totals.installLast)}</strong><br/></>}
+                      <span style={{color:C.muted}}>Juros economizados:</span> <strong style={{color:C.accent}}>{brl((sac.totals.totalInterest||0)-(sacAmort.totals.totalInterest||0))}</strong>
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
           </InputPanel>
           <InputPanel accentColor={C.cons} label="Consórcio Imobiliário">
             <InputMoney label="Carta de crédito"         value={carta}     onChange={setCarta}/>
@@ -1036,47 +1264,163 @@ export default function App() {
         />
 
         {/* GRÁFICOS */}
-        <ChartCard title="Evolução das parcelas" subtitle="Parcela mensal em cada modalidade ao longo do tempo.">
+        <ChartCard title="Evolução das parcelas" subtitle="Parcela mensal em cada modalidade ao longo do tempo. Clique na legenda para mostrar ou ocultar uma linha.">
           <ResponsiveContainer>
-            <LineChart data={chartParcelas}>
+            <LineChart data={chartParcelasEx}>
               <CartesianGrid strokeDasharray="3 3" stroke={C.border}/>
               <XAxis dataKey="month" tick={{fontSize:11,fontFamily:F.body,fill:C.muted}}/>
               <YAxis tickFormatter={v=>`R$${(v/1000).toFixed(0)}k`} tick={{fontSize:11,fontFamily:F.body,fill:C.muted}}/>
-              <Tooltip content={<CustomTooltip/>}/><Legend wrapperStyle={{fontFamily:F.body,fontSize:12}}/>
+              <Tooltip content={<CustomTooltip/>}/>
+              <Legend content={<CustomLegend/>}/>
               <ReferenceLine x={cmSafe} stroke={C.cons} strokeDasharray="5 4" label={{value:"Contemplação",fill:C.cons,fontSize:10,fontFamily:F.body}}/>
-              <Line type="monotone" dataKey="SAC"       stroke={C.sac}   strokeWidth={2.5} dot={false} strokeLinecap="round"/>
-              <Line type="monotone" dataKey="Price"     stroke={C.price} strokeWidth={2.5} dot={false} strokeLinecap="round"/>
-              <Line type="monotone" dataKey="Consórcio" stroke={C.cons}  strokeWidth={2.5} dot={false} strokeLinecap="round"/>
+              <Line type="monotone" dataKey="SAC" stroke={C.sac} strokeWidth={2.5} dot={false} strokeLinecap="round" hide={!visibleLines.SAC}/>
+              <Line type="monotone" dataKey="Price" stroke={C.price} strokeWidth={2.5} dot={false} strokeLinecap="round" hide={!visibleLines.Price}/>
+              <Line type="monotone" dataKey="Consórcio" stroke={C.cons} strokeWidth={2.5} dot={false} strokeLinecap="round" hide={!visibleLines["Consórcio"]}/>
+              {amortAtiva&&<Line type="monotone" dataKey="SAC+" stroke={C.sac} strokeWidth={2} strokeDasharray="6 3" dot={false} hide={!visibleLines["SAC+"]}/>}
+              {amortAtiva&&<Line type="monotone" dataKey="Price+" stroke={C.price} strokeWidth={2} strokeDasharray="6 3" dot={false} hide={!visibleLines["Price+"]}/>}
             </LineChart>
           </ResponsiveContainer>
         </ChartCard>
 
-        <ChartCard title="Desembolso total acumulado" subtitle="Tudo que saiu do bolso acumulado mês a mês (parcelas + entrada/lance + aluguel).">
+        <ChartCard title="Desembolso total acumulado" subtitle="Tudo que saiu do bolso acumulado mês a mês (parcelas + entrada/lance + aluguel). Clique na legenda para mostrar ou ocultar uma linha.">
           <ResponsiveContainer>
-            <LineChart data={chartDesembolso}>
+            <LineChart data={chartDesembolsoEx}>
               <CartesianGrid strokeDasharray="3 3" stroke={C.border}/>
               <XAxis dataKey="month" tick={{fontSize:11,fontFamily:F.body,fill:C.muted}}/>
               <YAxis tickFormatter={v=>`R$${(v/1000).toFixed(0)}k`} tick={{fontSize:11,fontFamily:F.body,fill:C.muted}}/>
-              <Tooltip content={<CustomTooltip/>}/><Legend wrapperStyle={{fontFamily:F.body,fontSize:12}}/>
+              <Tooltip content={<CustomTooltip/>}/>
+              <Legend content={<CustomLegend/>}/>
               <ReferenceLine x={cmSafe} stroke={C.cons} strokeDasharray="5 4" label={{value:"Contemplação",fill:C.cons,fontSize:10,fontFamily:F.body}}/>
-              <Line type="monotone" dataKey="SAC"       stroke={C.sac}   strokeWidth={2.5} dot={false} strokeLinecap="round"/>
-              <Line type="monotone" dataKey="Price"     stroke={C.price} strokeWidth={2.5} dot={false} strokeLinecap="round"/>
-              <Line type="monotone" dataKey="Consórcio" stroke={C.cons}  strokeWidth={2.5} dot={false} strokeLinecap="round"/>
+              <Line type="monotone" dataKey="SAC" stroke={C.sac} strokeWidth={2.5} dot={false} strokeLinecap="round" hide={!visibleLines.SAC}/>
+              <Line type="monotone" dataKey="Price" stroke={C.price} strokeWidth={2.5} dot={false} strokeLinecap="round" hide={!visibleLines.Price}/>
+              <Line type="monotone" dataKey="Consórcio" stroke={C.cons} strokeWidth={2.5} dot={false} strokeLinecap="round" hide={!visibleLines["Consórcio"]}/>
+              {amortAtiva&&<Line type="monotone" dataKey="SAC+" stroke={C.sac} strokeWidth={2} strokeDasharray="6 3" dot={false} hide={!visibleLines["SAC+"]}/>}
+              {amortAtiva&&<Line type="monotone" dataKey="Price+" stroke={C.price} strokeWidth={2} strokeDasharray="6 3" dot={false} hide={!visibleLines["Price+"]}/>}
             </LineChart>
           </ResponsiveContainer>
         </ChartCard>
 
-        <ChartCard title="Patrimônio líquido ao longo do tempo" subtitle="Valor do imóvel reajustado menos saldo devedor. Consórcio parte do zero — patrimônio existe só após a contemplação.">
+        <ChartCard title="Patrimônio líquido ao longo do tempo" subtitle="Valor do imóvel reajustado menos saldo devedor. Consórcio parte do zero — patrimônio existe só após a contemplação. Clique na legenda para mostrar ou ocultar uma linha.">
           <ResponsiveContainer>
             <LineChart data={chartPatrimonio}>
               <CartesianGrid strokeDasharray="3 3" stroke={C.border}/>
               <XAxis dataKey="month" tick={{fontSize:11,fontFamily:F.body,fill:C.muted}}/>
               <YAxis tickFormatter={v=>`R$${(v/1000).toFixed(0)}k`} tick={{fontSize:11,fontFamily:F.body,fill:C.muted}}/>
-              <Tooltip content={<CustomTooltip/>}/><Legend wrapperStyle={{fontFamily:F.body,fontSize:12}}/>
+              <Tooltip content={<CustomTooltip/>}/>
+              <Legend content={<CustomLegend/>}/>
               <ReferenceLine x={cmSafe} stroke={C.cons} strokeDasharray="5 4" label={{value:"Contemplação",fill:C.cons,fontSize:10,fontFamily:F.body}}/>
-              <Line type="monotone" dataKey="SAC"       stroke={C.sac}   strokeWidth={2.5} dot={false} strokeLinecap="round"/>
-              <Line type="monotone" dataKey="Price"     stroke={C.price} strokeWidth={2.5} dot={false} strokeLinecap="round"/>
-              <Line type="monotone" dataKey="Consórcio" stroke={C.cons}  strokeWidth={2.5} dot={false} strokeLinecap="round"/>
+              <Line type="monotone" dataKey="SAC" stroke={C.sac} strokeWidth={2.5} dot={false} strokeLinecap="round" hide={!visibleLines.SAC}/>
+              <Line type="monotone" dataKey="Price" stroke={C.price} strokeWidth={2.5} dot={false} strokeLinecap="round" hide={!visibleLines.Price}/>
+              <Line type="monotone" dataKey="Consórcio" stroke={C.cons} strokeWidth={2.5} dot={false} strokeLinecap="round" hide={!visibleLines["Consórcio"]}/>
+            </LineChart>
+          </ResponsiveContainer>
+        </ChartCard>
+
+        <ChartCard title="Evolução do saldo devedor" subtitle="Quanto ainda falta pagar do principal ao longo do tempo. SAC cai mais rápido no início · Price cai mais devagar no início mas equaliza. Clique na legenda para mostrar ou ocultar uma linha.">
+          <ResponsiveContainer>
+            <LineChart data={chartSaldo}>
+              <CartesianGrid strokeDasharray="3 3" stroke={C.border}/>
+              <XAxis dataKey="month" tick={{fontSize:11,fontFamily:F.body,fill:C.muted}}/>
+              <YAxis tickFormatter={v=>`R$${(v/1000).toFixed(0)}k`} tick={{fontSize:11,fontFamily:F.body,fill:C.muted}}/>
+              <Tooltip content={<CustomTooltip/>}/>
+              <Legend content={({payload})=>(
+                <div style={{display:"flex",justifyContent:"center",gap:20,marginTop:8,flexWrap:"wrap"}}>
+                  {[{value:"SAC",color:C.sac},{value:"Price",color:C.price},
+                    ...(amortAtiva?[{value:"SAC+",color:C.sac,dashed:true},{value:"Price+",color:C.price,dashed:true}]:[])
+                  ].map((p,i)=>{
+                    const active=visibleLines[p.value];
+                    return (
+                      <div key={i} onClick={()=>toggleLine(p.value)}
+                        style={{display:"flex",alignItems:"center",gap:6,cursor:"pointer",opacity:active?1:0.35,transition:"opacity 0.2s",userSelect:"none"}}>
+                        <div style={{width:24,height:3,borderRadius:2,background:p.color,opacity:p.dashed?0.6:1,
+                          backgroundImage:p.dashed?"repeating-linear-gradient(90deg,currentColor 0,currentColor 6px,transparent 6px,transparent 9px)":"none"}}/>
+                        <span style={{fontSize:12,fontFamily:F.body,color:active?C.text:C.muted,fontWeight:active?500:400,textDecoration:active?"none":"line-through"}}>{p.value}</span>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}/>
+              <Line type="monotone" dataKey="SAC" stroke={C.sac} strokeWidth={2.5} dot={false} strokeLinecap="round" hide={!visibleLines.SAC}/>
+              <Line type="monotone" dataKey="Price" stroke={C.price} strokeWidth={2.5} dot={false} strokeLinecap="round" hide={!visibleLines.Price}/>
+              {amortAtiva&&<Line type="monotone" dataKey="SAC+" stroke={C.sac} strokeWidth={2} strokeDasharray="6 3" dot={false} hide={!visibleLines["SAC+"]}/>}
+              {amortAtiva&&<Line type="monotone" dataKey="Price+" stroke={C.price} strokeWidth={2} strokeDasharray="6 3" dot={false} hide={!visibleLines["Price+"]}/>}
+            </LineChart>
+          </ResponsiveContainer>
+        </ChartCard>
+          <ResponsiveContainer>
+            <LineChart data={chartParcelas}>
+              <CartesianGrid strokeDasharray="3 3" stroke={C.border}/>
+              <XAxis dataKey="month" tick={{fontSize:11,fontFamily:F.body,fill:C.muted}}/>
+              <YAxis tickFormatter={v=>`R$${(v/1000).toFixed(0)}k`} tick={{fontSize:11,fontFamily:F.body,fill:C.muted}}/>
+              <Tooltip content={<CustomTooltip/>}/>
+              <Legend content={<CustomLegend/>}/>
+              <ReferenceLine x={cmSafe} stroke={C.cons} strokeDasharray="5 4" label={{value:"Contemplação",fill:C.cons,fontSize:10,fontFamily:F.body}}/>
+              <Line type="monotone" dataKey="SAC" stroke={C.sac} strokeWidth={2.5} dot={false} strokeLinecap="round" hide={!visibleLines.SAC}/>
+              <Line type="monotone" dataKey="Price" stroke={C.price} strokeWidth={2.5} dot={false} strokeLinecap="round" hide={!visibleLines.Price}/>
+              <Line type="monotone" dataKey="Consórcio" stroke={C.cons} strokeWidth={2.5} dot={false} strokeLinecap="round" hide={!visibleLines["Consórcio"]}/>
+            </LineChart>
+          </ResponsiveContainer>
+        </ChartCard>
+
+        <ChartCard title="Desembolso total acumulado" subtitle="Tudo que saiu do bolso acumulado mês a mês (parcelas + entrada/lance + aluguel). Clique na legenda para mostrar ou ocultar uma linha.">
+          <ResponsiveContainer>
+            <LineChart data={chartDesembolso}>
+              <CartesianGrid strokeDasharray="3 3" stroke={C.border}/>
+              <XAxis dataKey="month" tick={{fontSize:11,fontFamily:F.body,fill:C.muted}}/>
+              <YAxis tickFormatter={v=>`R$${(v/1000).toFixed(0)}k`} tick={{fontSize:11,fontFamily:F.body,fill:C.muted}}/>
+              <Tooltip content={<CustomTooltip/>}/>
+              <Legend content={<CustomLegend/>}/>
+              <ReferenceLine x={cmSafe} stroke={C.cons} strokeDasharray="5 4" label={{value:"Contemplação",fill:C.cons,fontSize:10,fontFamily:F.body}}/>
+              <Line type="monotone" dataKey="SAC" stroke={C.sac} strokeWidth={2.5} dot={false} strokeLinecap="round" hide={!visibleLines.SAC}/>
+              <Line type="monotone" dataKey="Price" stroke={C.price} strokeWidth={2.5} dot={false} strokeLinecap="round" hide={!visibleLines.Price}/>
+              <Line type="monotone" dataKey="Consórcio" stroke={C.cons} strokeWidth={2.5} dot={false} strokeLinecap="round" hide={!visibleLines["Consórcio"]}/>
+            </LineChart>
+          </ResponsiveContainer>
+        </ChartCard>
+
+        <ChartCard title="Patrimônio líquido ao longo do tempo" subtitle="Valor do imóvel reajustado menos saldo devedor. Consórcio parte do zero — patrimônio existe só após a contemplação. Clique na legenda para mostrar ou ocultar uma linha.">
+          <ResponsiveContainer>
+            <LineChart data={chartPatrimonio}>
+              <CartesianGrid strokeDasharray="3 3" stroke={C.border}/>
+              <XAxis dataKey="month" tick={{fontSize:11,fontFamily:F.body,fill:C.muted}}/>
+              <YAxis tickFormatter={v=>`R$${(v/1000).toFixed(0)}k`} tick={{fontSize:11,fontFamily:F.body,fill:C.muted}}/>
+              <Tooltip content={<CustomTooltip/>}/>
+              <Legend content={<CustomLegend/>}/>
+              <ReferenceLine x={cmSafe} stroke={C.cons} strokeDasharray="5 4" label={{value:"Contemplação",fill:C.cons,fontSize:10,fontFamily:F.body}}/>
+              <Line type="monotone" dataKey="SAC" stroke={C.sac} strokeWidth={2.5} dot={false} strokeLinecap="round" hide={!visibleLines.SAC}/>
+              <Line type="monotone" dataKey="Price" stroke={C.price} strokeWidth={2.5} dot={false} strokeLinecap="round" hide={!visibleLines.Price}/>
+              <Line type="monotone" dataKey="Consórcio" stroke={C.cons} strokeWidth={2.5} dot={false} strokeLinecap="round" hide={!visibleLines["Consórcio"]}/>
+            </LineChart>
+          </ResponsiveContainer>
+        </ChartCard>
+
+        <ChartCard title="Evolução do saldo devedor" subtitle="Quanto ainda falta pagar do principal ao longo do tempo. SAC cai mais rápido no início · Price cai mais devagar no início mas equaliza. Clique na legenda para mostrar ou ocultar uma linha.">
+          <ResponsiveContainer>
+            <LineChart data={chartSaldo}>
+              <CartesianGrid strokeDasharray="3 3" stroke={C.border}/>
+              <XAxis dataKey="month" tick={{fontSize:11,fontFamily:F.body,fill:C.muted}}/>
+              <YAxis tickFormatter={v=>`R$${(v/1000).toFixed(0)}k`} tick={{fontSize:11,fontFamily:F.body,fill:C.muted}}/>
+              <Tooltip content={<CustomTooltip/>}/>
+              <Legend content={({payload})=>(
+                <div style={{display:"flex",justifyContent:"center",gap:20,marginTop:8,flexWrap:"wrap"}}>
+                  {[{value:"SAC",color:C.sac},{value:"Price",color:C.price}].map((p,i)=>{
+                    const active=visibleLines[p.value];
+                    return (
+                      <div key={i} onClick={()=>toggleLine(p.value)}
+                        style={{display:"flex",alignItems:"center",gap:6,cursor:"pointer",
+                          opacity:active?1:0.35,transition:"opacity 0.2s",userSelect:"none"}}>
+                        <div style={{width:24,height:3,borderRadius:2,background:p.color}}/>
+                        <span style={{fontSize:12,fontFamily:F.body,color:active?C.text:C.muted,
+                          fontWeight:active?500:400,textDecoration:active?"none":"line-through"}}>
+                          {p.value}
+                        </span>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}/>
+              <Line type="monotone" dataKey="SAC" stroke={C.sac} strokeWidth={2.5} dot={false} strokeLinecap="round" hide={!visibleLines.SAC}/>
+              <Line type="monotone" dataKey="Price" stroke={C.price} strokeWidth={2.5} dot={false} strokeLinecap="round" hide={!visibleLines.Price}/>
             </LineChart>
           </ResponsiveContainer>
         </ChartCard>
@@ -1085,7 +1429,7 @@ export default function App() {
         <HistoricoTabela sac={sac} price={price} cons={cons} cmSafe={cmSafe} carta={carta} admin={admin} fundo={fundo} prazoCons={prazoCons}/>
 
         {/* FLUXO DE CAIXA */}
-        <FluxoCaixa sac={sac} price={price} cons={cons} cmSafe={cmSafe} entrada={entrada} fgts={fgts} lance={ct.lanceEfetivo||0} aluguelPorMes={aluguelPorMes}/>
+        <FluxoCaixa sac={sac} price={price} cons={cons} cmSafe={cmSafe} entrada={entrada} fgts={fgts} lance={ct.lanceEfetivo||0} aluguelPorMes={aluguelPorMes} sacAmort={sacAmort} priceAmort={priceAmort} amortAtiva={amortAtiva} amortMesAnual={amortMesAnual}/>
 
         {/* CENÁRIOS DE CONTEMPLAÇÃO */}
         <CenariosContemplacao cenarios={cenarios} cmSafe={cmSafe}/>
