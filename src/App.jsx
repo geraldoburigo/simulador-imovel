@@ -4,7 +4,7 @@ import {
   ResponsiveContainer, Legend, ReferenceLine,
 } from "recharts";
 
-// ─── FONTS ──────────────────────────────────────────────── v2.1 ──────────────
+// ─── FONTS ──────────────────────────────────────────────── v2.3 ──────────────
 const fontLink = document.createElement("link");
 fontLink.rel = "stylesheet";
 fontLink.href = "https://fonts.googleapis.com/css2?family=Fraunces:wght@600;700&family=DM+Sans:wght@300;400;500;600&display=swap";
