@@ -4,7 +4,7 @@ import {
   ResponsiveContainer, Legend, ReferenceLine,
 } from "recharts";
 
-// ─── FONTS ────────────────────────────────────────────────────────────────────
+// ─── FONTS ──────────────────────────────────────────────── v2.1 ──────────────
 const fontLink = document.createElement("link");
 fontLink.rel = "stylesheet";
 fontLink.href = "https://fonts.googleapis.com/css2?family=Fraunces:wght@600;700&family=DM+Sans:wght@300;400;500;600&display=swap";
@@ -85,40 +85,64 @@ function calcPrice(principal,rM,trM,months) {
 }
 
 // ─── CALC: SAC COM AMORTIZAÇÃO EXTRAORDINÁRIA ─────────────────────────────────
+// PRAZO: parcela original mantida. Amort extra reduz saldo → encerra antes.
+//        Você paga mesma parcela por menos meses → menos juros.
+// PARCELA: parcela recalculada sobre saldo menor e mesmo prazo → parcela cai.
+//          Você paga parcelas menores pelo mesmo prazo → mais juros que prazo.
 function calcSacAmort(principal,rM,trM,months,amortMensal,amortAnual,mesAnual,efeito) {
   if(principal<=0||months<=0) return {rows:[],totals:{}};
+
+  // Pré-calcula parcelas originais (sem amort extra) para modo prazo
+  const instOriginais=[];
+  if(efeito==="prazo"){
+    let b2=principal;
+    for(let i=0;i<months;i++){
+      const rem=months-i;
+      const tr=b2*trM; b2+=tr;
+      const amort=b2/rem;
+      const interest=b2*rM;
+      instOriginais.push(amort+interest);
+      b2=Math.max(b2-amort,0);
+    }
+  }
+
   let bal=principal,cumInstall=0,cumInterest=0,cumTR=0,cumAmortExtra=0;
   const rows=[];
 
   for(let i=0;i<months;i++){
-    const m=i+1;
-    const rem=months-i; // sempre months-i para ambos os modos
-
-    // Calcula parcela normal
-    const tr=bal>0?bal*trM:0; bal+=tr;
-    const interest=bal>0?bal*rM:0;
-    const amort=bal>0?bal/rem:0;
-    const inst=bal>0?amort+interest:0;
+    const m=i+1, rem=months-i;
+    if(bal<0.01){
+      if(efeito==="prazo") break;
+      rows.push({month:m,installment:0,interest:0,tr:0,amort:0,amortExtra:0,bal:0,cumInstall,cumInterest,cumTR,cumAmortExtra});
+      continue;
+    }
+    const tr=bal*trM; bal+=tr;
+    const interest=bal*rM;
+    let inst, amort;
+    if(efeito==="prazo"){
+      // Mantém parcela original — amortiza mais quando saldo está menor
+      inst=instOriginais[i]||0;
+      amort=Math.max(inst-interest,0);
+    } else {
+      // Recalcula parcela sobre saldo atual e prazo nominal
+      amort=bal/rem;
+      inst=amort+interest;
+    }
     bal=Math.max(bal-amort,0);
     cumInstall+=inst; cumInterest+=interest; cumTR+=tr;
-
-    // Amortização extraordinária
-    const isAnual=amortAnual>0&&(m%12===(mesAnual<=0?12:mesAnual)%12||mesAnual===12&&m%12===0);
-    const extra=Math.min((amortMensal||0)+(isAnual?(amortAnual||0):0), bal);
+    const mNorm=m%12===0?12:m%12;
+    const mesNorm=(mesAnual||12)%12===0?12:(mesAnual||12)%12;
+    const isAnual=amortAnual>0&&mNorm===mesNorm;
+    const extra=Math.min((amortMensal||0)+(isAnual?(amortAnual||0):0),bal);
     bal=Math.max(bal-extra,0);
     cumAmortExtra+=extra;
-
-    rows.push({month:m,installment:inst,interest,tr,amort,amortExtra:extra,bal,
-      cumInstall,cumInterest,cumTR,cumAmortExtra});
-
-    // Reduz prazo: encerra quando saldo zera
+    rows.push({month:m,installment:inst,interest,tr,amort,amortExtra:extra,bal,cumInstall,cumInterest,cumTR,cumAmortExtra});
     if(efeito==="prazo"&&bal<0.01) break;
-    // Reduz parcela: sempre vai até months (não break)
   }
 
   const last=rows[rows.length-1]||{};
   const validRows=rows.filter(r=>r.installment>0.01);
-  const prazoEfetivo=efeito==="prazo"?rows.length:validRows.length;
+  const prazoEfetivo=validRows.length;
   return {rows,totals:{
     installFirst:rows[0]?.installment||0,
     installLast:validRows[validRows.length-1]?.installment||0,
@@ -133,38 +157,60 @@ function calcSacAmort(principal,rM,trM,months,amortMensal,amortAnual,mesAnual,ef
 }
 
 // ─── CALC: PRICE COM AMORTIZAÇÃO EXTRAORDINÁRIA ───────────────────────────────
+// PRAZO: PMT original mantido. Amort extra → encerra antes.
+// PARCELA: PMT recalculado sobre saldo menor e mesmo prazo → parcela cai.
 function calcPriceAmort(principal,rM,trM,months,amortMensal,amortAnual,mesAnual,efeito) {
   if(principal<=0||months<=0) return {rows:[],totals:{}};
+
+  // Pré-calcula PMTs originais para modo prazo
+  const instOriginais=[];
+  if(efeito==="prazo"){
+    let b2=principal;
+    for(let i=0;i<months;i++){
+      const rem=months-i;
+      const tr=b2*trM; b2+=tr;
+      const inst=pmtFn(b2,rM,rem);
+      const amort=Math.max(inst-b2*rM,0);
+      instOriginais.push(inst);
+      b2=Math.max(b2-amort,0);
+    }
+  }
+
   let bal=principal,cumInstall=0,cumInterest=0,cumTR=0,cumAmortExtra=0;
   const rows=[];
 
   for(let i=0;i<months;i++){
-    const m=i+1;
-    const rem=months-i; // sempre months-i para ambos os modos
-
-    const tr=bal>0?bal*trM:0; bal+=tr;
-    const interest=bal>0?bal*rM:0;
-    // Price: PMT sobre saldo atual e meses restantes originais
-    const inst=bal>0?pmtFn(bal,rM,rem):0;
-    const amort=Math.max(inst-interest,0);
+    const m=i+1, rem=months-i;
+    if(bal<0.01){
+      if(efeito==="prazo") break;
+      rows.push({month:m,installment:0,interest:0,tr:0,amort:0,amortExtra:0,bal:0,cumInstall,cumInterest,cumTR,cumAmortExtra});
+      continue;
+    }
+    const tr=bal*trM; bal+=tr;
+    const interest=bal*rM;
+    let inst, amort;
+    if(efeito==="prazo"){
+      inst=instOriginais[i]||0;
+      amort=Math.max(inst-interest,0);
+    } else {
+      inst=bal>0?pmtFn(bal,rM,rem):0;
+      amort=Math.max(inst-interest,0);
+    }
     bal=Math.max(bal-amort,0);
     cumInstall+=inst; cumInterest+=interest; cumTR+=tr;
-
-    // Amortização extraordinária
-    const isAnual=amortAnual>0&&(m%12===(mesAnual<=0?12:mesAnual)%12||mesAnual===12&&m%12===0);
-    const extra=Math.min((amortMensal||0)+(isAnual?(amortAnual||0):0), bal);
+    const mNorm=m%12===0?12:m%12;
+    const mesNorm=(mesAnual||12)%12===0?12:(mesAnual||12)%12;
+    const isAnual=amortAnual>0&&mNorm===mesNorm;
+    const extra=Math.min((amortMensal||0)+(isAnual?(amortAnual||0):0),bal);
     bal=Math.max(bal-extra,0);
     cumAmortExtra+=extra;
-
-    rows.push({month:m,installment:inst,interest,tr,amort,amortExtra:extra,bal,
-      cumInstall,cumInterest,cumTR,cumAmortExtra});
-
+    rows.push({month:m,installment:inst,interest,tr,amort,amortExtra:extra,bal,cumInstall,cumInterest,cumTR,cumAmortExtra});
     if(efeito==="prazo"&&bal<0.01) break;
   }
 
   const last=rows[rows.length-1]||{};
   const validRows=rows.filter(r=>r.installment>0.01);
-  const prazoEfetivo=efeito==="prazo"?rows.length:validRows.length;
+  const prazoEfetivo=validRows.length;
   return {rows,totals:{
     installFirst:rows[0]?.installment||0,
     installLast:validRows[validRows.length-1]?.installment||0,
@@ -1157,10 +1203,11 @@ export default function App() {
                   {/* Resumo do impacto */}
                   {sacAmort&&(
                     <div style={{background:C.soft,borderRadius:8,padding:"10px 12px",fontSize:12,fontFamily:F.body,lineHeight:1.8}}>
-                      <div style={{fontWeight:700,color:C.sac,marginBottom:4}}>Impacto SAC+</div>
+                      <div style={{fontWeight:700,color:C.sac,marginBottom:4}}>Impacto SAC+ — {amortEfeito==="prazo"?"Reduz prazo":"Reduz parcela"}</div>
                       {amortEfeito==="prazo"
-                        ?<><span style={{color:C.muted}}>Prazo:</span> <strong>{sacAmort.totals.prazoEfetivo} meses</strong> <span style={{color:C.accent}}>(-{sacAmort.totals.mesesEconomizados} meses)</span><br/></>
-                        :<><span style={{color:C.muted}}>Parcela final:</span> <strong>{brl(sacAmort.totals.installLast)}</strong><br/></>}
+                        ?<><span style={{color:C.muted}}>Prazo efetivo:</span> <strong>{sacAmort.totals.prazoEfetivo} meses</strong> <span style={{color:C.accent}}>(-{sacAmort.totals.mesesEconomizados} meses)</span><br/></>
+                        :<><span style={{color:C.muted}}>Parcela final:</span> <strong>{brl(sacAmort.totals.installLast)}</strong> <span style={{color:C.muted,fontSize:11}}>(sem amort: {brl(sac.totals.installLast)})</span><br/></>}
+                      <span style={{color:C.muted}}>Juros totais SAC+:</span> <strong>{brl(sacAmort.totals.totalInterest)}</strong><br/>
                       <span style={{color:C.muted}}>Juros economizados:</span> <strong style={{color:C.accent}}>{brl((sac.totals.totalInterest||0)-(sacAmort.totals.totalInterest||0))}</strong>
                     </div>
                   )}
