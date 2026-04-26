@@ -85,7 +85,7 @@ function calcPrice(principal,rM,trM,months) {
 }
 
 // ─── CALC: SAC COM AMORTIZAÇÃO EXTRAORDINÁRIA ─────────────────────────────────
-function calcSacAmort(principal,rM,trM,months,amortMensal,amortAnual,mesAnual,efeito) {
+function calcSacAmort(principal,rM,trM,months,amortMensal,amortAnual,mesAnual,efeito,periodicidade,anoUnico) {
   if(principal<=0||months<=0) return {rows:[],totals:{}};
 
   // Pré-calcula parcelas originais apenas para modo PRAZO
@@ -137,7 +137,10 @@ function calcSacAmort(principal,rM,trM,months,amortMensal,amortAnual,mesAnual,ef
 
     const mNorm=m%12===0?12:m%12;
     const mesNorm=(mesAnual||12)%12===0?12:(mesAnual||12)%12;
-    const isAnual=amortAnual>0&&mNorm===mesNorm;
+    const anoAtual=Math.ceil(m/12);
+    const isAnual=amortAnual>0&&mNorm===mesNorm&&(
+      periodicidade==="uma_vez"?(anoAtual===(anoUnico||1)):true
+    );
     const extra=Math.min((amortMensal||0)+(isAnual?(amortAnual||0):0), bal);
     bal=Math.max(bal-extra,0);
     cumAmortExtra+=extra;
@@ -166,7 +169,7 @@ function calcSacAmort(principal,rM,trM,months,amortMensal,amortAnual,mesAnual,ef
 }
 
 // ─── CALC: PRICE COM AMORTIZAÇÃO EXTRAORDINÁRIA ───────────────────────────────
-function calcPriceAmort(principal,rM,trM,months,amortMensal,amortAnual,mesAnual,efeito) {
+function calcPriceAmort(principal,rM,trM,months,amortMensal,amortAnual,mesAnual,efeito,periodicidade,anoUnico) {
   if(principal<=0||months<=0) return {rows:[],totals:{}};
 
   const instOriginais=[];
@@ -212,7 +215,10 @@ function calcPriceAmort(principal,rM,trM,months,amortMensal,amortAnual,mesAnual,
 
     const mNorm=m%12===0?12:m%12;
     const mesNorm=(mesAnual||12)%12===0?12:(mesAnual||12)%12;
-    const isAnual=amortAnual>0&&mNorm===mesNorm;
+    const anoAtual=Math.ceil(m/12);
+    const isAnual=amortAnual>0&&mNorm===mesNorm&&(
+      periodicidade==="uma_vez"?(anoAtual===(anoUnico||1)):true
+    );
     const extra=Math.min((amortMensal||0)+(isAnual?(amortAnual||0):0), bal);
     bal=Math.max(bal-extra,0);
     cumAmortExtra+=extra;
@@ -1034,7 +1040,9 @@ export default function App() {
   const [amortMensal,setAmortMensal]=useState(0);
   const [amortAnual,setAmortAnual]=useState(0);
   const [amortMesAnual,setAmortMesAnual]=useState(12);
-  const [amortEfeito,setAmortEfeito]=useState("prazo"); // "prazo" | "parcela"
+  const [amortEfeito,setAmortEfeito]=useState("prazo");
+  const [amortPeriodicidade,setAmortPeriodicidade]=useState("todo_ano"); // "todo_ano" | "uma_vez"
+  const [amortAno,setAmortAno]=useState(5); // ano do aporte único (1=primeiro ano)
 
   const rM=useMemo(()=>annualToMonthly(juros),[juros]);
   const trM=useMemo(()=>annualToMonthly(trAnual),[trAnual]);
@@ -1046,8 +1054,8 @@ export default function App() {
   const price=useMemo(()=>calcPrice(principal,rM,trM,prazoFin),[principal,rM,trM,prazoFin]);
   const cons=useMemo(()=>calcConsorcio(carta,prazoCons,admin/100,fundo/100,idxM,cmSafe,lance,promoDesc/100,promoMeses),[carta,prazoCons,admin,fundo,idxM,cmSafe,lance,promoDesc,promoMeses]);
 
-  const sacAmort=useMemo(()=>amortAtiva?calcSacAmort(principal,rM,trM,prazoFin,amortMensal,amortAnual,amortMesAnual,amortEfeito):null,[principal,rM,trM,prazoFin,amortMensal,amortAnual,amortMesAnual,amortEfeito,amortAtiva]);
-  const priceAmort=useMemo(()=>amortAtiva?calcPriceAmort(principal,rM,trM,prazoFin,amortMensal,amortAnual,amortMesAnual,amortEfeito):null,[principal,rM,trM,prazoFin,amortMensal,amortAnual,amortMesAnual,amortEfeito,amortAtiva]);
+  const sacAmort=useMemo(()=>amortAtiva?calcSacAmort(principal,rM,trM,prazoFin,amortMensal,amortAnual,amortMesAnual,amortEfeito,amortPeriodicidade,amortAno):null,[principal,rM,trM,prazoFin,amortMensal,amortAnual,amortMesAnual,amortEfeito,amortAtiva,amortPeriodicidade,amortAno]);
+  const priceAmort=useMemo(()=>amortAtiva?calcPriceAmort(principal,rM,trM,prazoFin,amortMensal,amortAnual,amortMesAnual,amortEfeito,amortPeriodicidade,amortAno):null,[principal,rM,trM,prazoFin,amortMensal,amortAnual,amortMesAnual,amortEfeito,amortAtiva,amortPeriodicidade,amortAno]);
 
   const st=sac.totals,pt=price.totals,ct=cons.totals;
   const aluguelMensal=Number(aluguel)||0;
@@ -1214,9 +1222,29 @@ export default function App() {
               {amortAtiva&&(
                 <div style={{display:"flex",flexDirection:"column",gap:12}}>
                   <InputMoney label="Complemento mensal" value={amortMensal} onChange={setAmortMensal} hint="Valor extra pago todo mês além da parcela"/>
-                  <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10}}>
-                    <InputMoney label="Amortização anual" value={amortAnual} onChange={setAmortAnual} hint="1x por ano"/>
-                    <InputInt   label="Mês do pagamento" value={amortMesAnual} onChange={setAmortMesAnual} hint="1=jan · 12=dez"/>
+                  
+                  {/* Amortização anual */}
+                  <div>
+                    <div style={{fontSize:12,fontWeight:600,color:C.muted,marginBottom:6,textTransform:"uppercase",letterSpacing:"0.07em"}}>Amortização anual</div>
+                    <div style={{display:"flex",gap:6,marginBottom:8}}>
+                      {[{v:"todo_ano",label:"Todo ano"},{v:"uma_vez",label:"Uma vez"}].map(op=>(
+                        <button key={op.v} onClick={()=>setAmortPeriodicidade(op.v)} style={{flex:1,padding:"6px 8px",borderRadius:8,border:`1.5px solid ${amortPeriodicidade===op.v?C.sac:C.border}`,background:amortPeriodicidade===op.v?"#eff6ff":"#fff",color:amortPeriodicidade===op.v?C.sac:C.muted,fontFamily:F.body,fontSize:12,fontWeight:600,cursor:"pointer",transition:"all 0.15s"}}>
+                          {op.label}
+                        </button>
+                      ))}
+                    </div>
+                    <div style={{display:"grid",gridTemplateColumns:amortPeriodicidade==="uma_vez"?"1fr 1fr 1fr":"1fr 1fr",gap:8}}>
+                      <InputMoney label="Valor" value={amortAnual} onChange={setAmortAnual} hint="Aporte extra"/>
+                      {amortPeriodicidade==="uma_vez"&&(
+                        <InputInt label="Ano" value={amortAno} onChange={setAmortAno} hint="Ex: 5 = 5º ano"/>
+                      )}
+                      <InputInt label="Mês" value={amortMesAnual} onChange={setAmortMesAnual} hint="1=jan · 12=dez"/>
+                    </div>
+                    {amortPeriodicidade==="uma_vez"&&amortAnual>0&&(
+                      <div style={{fontSize:11,color:C.muted,marginTop:6,background:C.soft,borderRadius:8,padding:"6px 10px"}}>
+                        Aporte de {brl(amortAnual)} no mês {((amortAno-1)*12)+amortMesAnual} (ano {amortAno}, {["jan","fev","mar","abr","mai","jun","jul","ago","set","out","nov","dez"][(amortMesAnual-1)]||"dez"})
+                      </div>
+                    )}
                   </div>
                   <div>
                     <div style={{fontSize:12,fontWeight:600,color:C.muted,marginBottom:6,textTransform:"uppercase",letterSpacing:"0.07em"}}>Efeito da amortização</div>
