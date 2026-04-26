@@ -1232,6 +1232,11 @@ export default function App() {
                                   <strong style={{color:C.accent}}>{item.data.totals.prazoEfetivo} meses <span style={{fontSize:10}}>(-{item.data.totals.mesesEconomizados})</span></strong>
                                 </div>
                               )}
+                              {amortEfeito==="parcela"&&item.data.totals.mesesEconomizados>0&&(
+                                <div style={{fontSize:10,color:C.accent,marginTop:2,fontWeight:600}}>
+                                  ✓ Contrato quitado no mês {item.data.totals.prazoEfetivo}
+                                </div>
+                              )}
                               <div style={{display:"flex",justifyContent:"space-between",borderTop:`1px solid ${C.border}`,marginTop:4,paddingTop:4}}>
                                 <span style={{color:C.muted}}>Juros economizados</span>
                                 <strong style={{color:C.accent}}>{brl((item.base.totals.totalInterest||0)-(item.data.totals.totalInterest||0))}</strong>
@@ -1343,8 +1348,8 @@ export default function App() {
               <Line type="monotone" dataKey="SAC" stroke={C.sac} strokeWidth={2.5} dot={false} strokeLinecap="round" hide={!visibleLines.SAC}/>
               <Line type="monotone" dataKey="Price" stroke={C.price} strokeWidth={2.5} dot={false} strokeLinecap="round" hide={!visibleLines.Price}/>
               <Line type="monotone" dataKey="Consórcio" stroke={C.cons} strokeWidth={2.5} dot={false} strokeLinecap="round" hide={!visibleLines["Consórcio"]}/>
-              {amortAtiva&&<Line type="monotone" dataKey="SAC+" stroke={C.sac} strokeWidth={2} strokeDasharray="6 3" dot={false} hide={!visibleLines["SAC+"]}/>}
-              {amortAtiva&&<Line type="monotone" dataKey="Price+" stroke={C.price} strokeWidth={2} strokeDasharray="6 3" dot={false} hide={!visibleLines["Price+"]}/>}
+              {amortAtiva&&<Line type="monotone" dataKey="SAC+" stroke={C.sac} strokeWidth={2} strokeDasharray="6 3" dot={false} hide={!visibleLines["SAC+"]} connectNulls={false}/>}
+              {amortAtiva&&<Line type="monotone" dataKey="Price+" stroke={C.price} strokeWidth={2} strokeDasharray="6 3" dot={false} hide={!visibleLines["Price+"]} connectNulls={false}/>}
             </LineChart>
           </ResponsiveContainer>
         </ChartCard>
