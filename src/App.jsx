@@ -1325,8 +1325,7 @@ export default function App() {
                       ))}
                     </div>
                   </div>
-                  <div>
-                </div>
+                  </div>
               )}
             </div>
           </InputPanel>
@@ -1374,7 +1373,6 @@ export default function App() {
 
         {/* DESTAQUES */}
         {(()=>{
-          const sacSintTotal=(sacSint.totals.totalPaid||0)+entrada+fgts;
           const sacSintAmortTotal=sacSintAmort?(sacSintAmort.totals.totalPaid||0)+entrada+fgts:null;
           const cols=[
             {id:"sac",  label:"SAC",        value:sacTotal,        color:C.sac,   pFirst:st.installFirst,  pLast:st.installLast,  extra:null,
