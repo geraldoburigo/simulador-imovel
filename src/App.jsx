@@ -1136,19 +1136,32 @@ export default function App() {
     month:i+1,
     SAC:sac.rows[i]?.bal||null,
     Price:price.rows[i]?.bal||null,
-    "SAC+":sacAmort?.rows[i]?.bal||null,
-    "Price+":priceAmort?.rows[i]?.bal||null,
+    "SAC+":sacAmort?.rows[i]!=null?sacAmort.rows[i].bal:null,
+    "Price+":priceAmort?.rows[i]!=null?priceAmort.rows[i].bal:null,
   })),[sac.rows,price.rows,sacAmort,priceAmort,maxM]);
 
   // Chart parcelas com amort
+  // Para o gráfico: no modo parcela, installment=0 é válido (contrato existe, parcela zerou)
+  // No modo prazo, após o contrato encerrar não há dados
+  const sacAmortInst=(i)=>{
+    if(!sacAmort?.rows[i]) return null;
+    if(amortEfeito==="parcela") return sacAmort.rows[i].installment; // mostra 0 como válido
+    return sacAmort.rows[i].installment>0?sacAmort.rows[i].installment:null;
+  };
+  const priceAmortInst=(i)=>{
+    if(!priceAmort?.rows[i]) return null;
+    if(amortEfeito==="parcela") return priceAmort.rows[i].installment;
+    return priceAmort.rows[i].installment>0?priceAmort.rows[i].installment:null;
+  };
+
   const chartParcelasEx=useMemo(()=>Array.from({length:maxM},(_,i)=>({
     month:i+1,
     SAC:sac.rows[i]?.installment>0?sac.rows[i].installment:null,
     Price:price.rows[i]?.installment>0?price.rows[i].installment:null,
     "Consórcio":cons.rows[i]?.installment>0?cons.rows[i].installment:null,
-    "SAC+":sacAmort?.rows[i]?.installment>0?sacAmort.rows[i].installment:null,
-    "Price+":priceAmort?.rows[i]?.installment>0?priceAmort.rows[i].installment:null,
-  })),[sac.rows,price.rows,cons.rows,sacAmort,priceAmort,maxM]);
+    "SAC+":sacAmortInst(i),
+    "Price+":priceAmortInst(i),
+  })),[sac.rows,price.rows,cons.rows,sacAmort,priceAmort,maxM,amortEfeito]);
 
   const chartDesembolsoEx=useMemo(()=>{
     let ac=0;
