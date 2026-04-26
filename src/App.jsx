@@ -113,18 +113,19 @@ function calcSacAmort(principal,rM,trM,months,amortMensal,amortAnual,mesAnual,ef
     const m=i+1, rem=months-i;
     if(bal<0.01){
       if(efeito==="prazo") break;
+      // modo parcela: preenche com parcela=0 até mês N para manter gráfico até o fim
       rows.push({month:m,installment:0,interest:0,tr:0,amort:0,amortExtra:0,bal:0,cumInstall,cumInterest,cumTR,cumAmortExtra});
       continue;
     }
     const tr=bal*trM; bal+=tr;
     const interest=bal*rM;
     let inst, amort;
-    if(efeito==="prazo"){
-      // Mantém parcela original — amortiza mais quando saldo está menor
+    if(efeito==="prazo"&&instOriginais.length>0){
+      // Mantém parcela original — amortiza mais quando saldo está menor → encerra antes
       inst=instOriginais[i]||0;
       amort=Math.max(inst-interest,0);
     } else {
-      // Recalcula parcela sobre saldo atual e prazo nominal
+      // Recalcula parcela sobre saldo atual e prazo nominal → parcela cai, prazo fixo
       amort=bal/rem;
       inst=amort+interest;
     }
@@ -189,7 +190,7 @@ function calcPriceAmort(principal,rM,trM,months,amortMensal,amortAnual,mesAnual,
     const tr=bal*trM; bal+=tr;
     const interest=bal*rM;
     let inst, amort;
-    if(efeito==="prazo"){
+    if(efeito==="prazo"&&instOriginais.length>0){
       inst=instOriginais[i]||0;
       amort=Math.max(inst-interest,0);
     } else {
@@ -1201,14 +1202,44 @@ export default function App() {
                     </div>
                   </div>
                   {/* Resumo do impacto */}
-                  {sacAmort&&(
-                    <div style={{background:C.soft,borderRadius:8,padding:"10px 12px",fontSize:12,fontFamily:F.body,lineHeight:1.8}}>
-                      <div style={{fontWeight:700,color:C.sac,marginBottom:4}}>Impacto SAC+ — {amortEfeito==="prazo"?"Reduz prazo":"Reduz parcela"}</div>
-                      {amortEfeito==="prazo"
-                        ?<><span style={{color:C.muted}}>Prazo efetivo:</span> <strong>{sacAmort.totals.prazoEfetivo} meses</strong> <span style={{color:C.accent}}>(-{sacAmort.totals.mesesEconomizados} meses)</span><br/></>
-                        :<><span style={{color:C.muted}}>Parcela final:</span> <strong>{brl(sacAmort.totals.installLast)}</strong> <span style={{color:C.muted,fontSize:11}}>(sem amort: {brl(sac.totals.installLast)})</span><br/></>}
-                      <span style={{color:C.muted}}>Juros totais SAC+:</span> <strong>{brl(sacAmort.totals.totalInterest)}</strong><br/>
-                      <span style={{color:C.muted}}>Juros economizados:</span> <strong style={{color:C.accent}}>{brl((sac.totals.totalInterest||0)-(sacAmort.totals.totalInterest||0))}</strong>
+                  {/* CARD AMORT+ LADO A LADO */}
+                  {amortAtiva&&(sacAmort||priceAmort)&&(
+                    <div style={{marginTop:4}}>
+                      <div style={{fontSize:11,fontWeight:700,color:C.muted,textTransform:"uppercase",letterSpacing:"0.07em",marginBottom:8}}>Resultado com amortização</div>
+                      <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8}}>
+                        {[
+                          {label:"SAC+",data:sacAmort,base:sac,color:C.sac},
+                          {label:"Price+",data:priceAmort,base:price,color:C.price},
+                        ].map((item,i)=>item.data&&(
+                          <div key={i} style={{borderRadius:10,padding:"10px 12px",background:"#eff6ff",border:`1.5px solid ${item.color}22`}}>
+                            <div style={{fontSize:11,fontWeight:700,color:item.color,marginBottom:6,textTransform:"uppercase",letterSpacing:"0.06em"}}>{item.label}</div>
+                            <div style={{fontSize:12,fontFamily:F.body,lineHeight:1.9}}>
+                              <div style={{display:"flex",justifyContent:"space-between"}}>
+                                <span style={{color:C.muted}}>Total desembolsado</span>
+                                <strong style={{color:C.text}}>{brl((item.data.totals.totalPaid||0)+entrada+fgts)}</strong>
+                              </div>
+                              <div style={{display:"flex",justifyContent:"space-between"}}>
+                                <span style={{color:C.muted}}>Parcela inicial</span>
+                                <strong style={{color:C.text}}>{brl(item.data.totals.installFirst)}</strong>
+                              </div>
+                              <div style={{display:"flex",justifyContent:"space-between"}}>
+                                <span style={{color:C.muted}}>Parcela final</span>
+                                <strong style={{color:C.text}}>{brl(item.data.totals.installLast)}</strong>
+                              </div>
+                              {amortEfeito==="prazo"&&(
+                                <div style={{display:"flex",justifyContent:"space-between"}}>
+                                  <span style={{color:C.muted}}>Prazo</span>
+                                  <strong style={{color:C.accent}}>{item.data.totals.prazoEfetivo} meses <span style={{fontSize:10}}>(-{item.data.totals.mesesEconomizados})</span></strong>
+                                </div>
+                              )}
+                              <div style={{display:"flex",justifyContent:"space-between",borderTop:`1px solid ${C.border}`,marginTop:4,paddingTop:4}}>
+                                <span style={{color:C.muted}}>Juros economizados</span>
+                                <strong style={{color:C.accent}}>{brl((item.base.totals.totalInterest||0)-(item.data.totals.totalInterest||0))}</strong>
+                              </div>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
                     </div>
                   )}
                 </div>
