@@ -245,71 +245,6 @@ function calcPriceAmort(principal,rM,trM,months,amortMensal,amortAnual,mesAnual,
   }};
 }
 
-// ─── CALC: SAC SINTÉTICA ──────────────────────────────────────────────────────
-// Contrata Price mas amortiza mensalmente a diferença (SAC - Price) quando positiva
-// Parcela mensal do cliente = parcela Price original (não muda)
-// Amort extra = max(instSACoriginal - instPriceOriginal, 0)
-// Efeito: reduz prazo → encerra muito antes de months
-function calcSacSintetica(principal,rM,trM,months,sacRows) {
-  return calcSacSinteticaAmort(principal,rM,trM,months,sacRows,0,0,12,"prazo","todo_ano",1);
-}
-
-// SAC Sintética + amortizações extraordinárias adicionais
-function calcSacSinteticaAmort(principal,rM,trM,months,sacRows,amortMensal,amortAnual,mesAnual,efeito,periodicidade,anoUnico) {
-  if(principal<=0||months<=0||!sacRows?.length) return {rows:[],totals:{}};
-
-  const priceOriginais=[];
-  let b2=principal;
-  for(let i=0;i<months;i++){
-    const rem=months-i;
-    const tr=b2*trM; b2+=tr;
-    const inst=pmtFn(b2,rM,rem);
-    priceOriginais.push(inst);
-    b2=Math.max(b2-Math.max(inst-b2*rM,0),0);
-  }
-
-  let bal=principal,cumInstall=0,cumInterest=0,cumTR=0,cumAmortExtra=0;
-  const rows=[];
-
-  for(let i=0;i<months;i++){
-    if(bal<0.01) break;
-    const m=i+1;
-    const tr=bal*trM; bal+=tr;
-    const interest=bal*rM;
-    const installment=priceOriginais[i]||0;
-    const amort=Math.max(installment-interest,0);
-    bal=Math.max(bal-amort,0);
-    cumInstall+=installment; cumInterest+=interest; cumTR+=tr;
-    // Diferença SAC - Price (amort base da estratégia)
-    const instSac=sacRows[i]?.installment||0;
-    const diff=Math.max(instSac-installment,0);
-    // Amortizações extraordinárias adicionais
-    const mNorm=m%12===0?12:m%12;
-    const mesNorm=(mesAnual||12)%12===0?12:(mesAnual||12)%12;
-    const anoAtual=Math.ceil(m/12);
-    const isAnual=amortAnual>0&&mNorm===mesNorm&&(periodicidade==="uma_vez"?(anoAtual===(anoUnico||1)):true);
-    const extraAdicional=(amortMensal||0)+(isAnual?(amortAnual||0):0);
-    const extra=Math.min(diff+extraAdicional,bal);
-    bal=Math.max(bal-extra,0);
-    cumAmortExtra+=extra;
-    rows.push({month:m,installment,instSac,amortExtra:extra,bal,
-      cumInstall,cumInterest,cumTR,cumAmortExtra,
-      totalMensal:installment+extra});
-    if(bal<0.01) break;
-  }
-
-  const last=rows[rows.length-1]||{};
-  return {rows,totals:{
-    installFirst:rows[0]?.totalMensal||0,
-    installLast:rows[rows.length-1]?.totalMensal||0,
-    totalInterest:last.cumInterest||0,
-    totalTR:last.cumTR||0,
-    totalPaid:(last.cumInstall||0)+(last.cumAmortExtra||0),
-    prazoEfetivo:rows.length,
-    mesesEconomizados:months-rows.length,
-  }};
-}
-
 // ─── CALC: CONSÓRCIO ──────────────────────────────────────────────────────────
 /**
  * Sem promoção:
@@ -1121,8 +1056,6 @@ export default function App() {
 
   const sacAmort=useMemo(()=>amortAtiva?calcSacAmort(principal,rM,trM,prazoFin,amortMensal,amortAnual,amortMesAnual,amortEfeito,amortPeriodicidade,amortAno):null,[principal,rM,trM,prazoFin,amortMensal,amortAnual,amortMesAnual,amortEfeito,amortAtiva,amortPeriodicidade,amortAno]);
   const priceAmort=useMemo(()=>amortAtiva?calcPriceAmort(principal,rM,trM,prazoFin,amortMensal,amortAnual,amortMesAnual,amortEfeito,amortPeriodicidade,amortAno):null,[principal,rM,trM,prazoFin,amortMensal,amortAnual,amortMesAnual,amortEfeito,amortAtiva,amortPeriodicidade,amortAno]);
-  const sacSint=useMemo(()=>calcSacSintetica(principal,rM,trM,prazoFin,sac.rows),[principal,rM,trM,prazoFin,sac.rows]);
-  const sacSintAmort=useMemo(()=>amortAtiva?calcSacSinteticaAmort(principal,rM,trM,prazoFin,sac.rows,amortMensal,amortAnual,amortMesAnual,amortEfeito,amortPeriodicidade,amortAno):null,[principal,rM,trM,prazoFin,sac.rows,amortMensal,amortAnual,amortMesAnual,amortEfeito,amortAtiva,amortPeriodicidade,amortAno]);
 
   const st=sac.totals,pt=price.totals,ct=cons.totals;
   const aluguelMensal=Number(aluguel)||0;
@@ -1176,11 +1109,10 @@ export default function App() {
   }), [carta, prazoCons, admin, fundo, idxM, lance, promoDesc, promoMeses, cenariosMeses.join()]);
 
   const totaisList=[{label:"SAC",value:sacTotal,color:C.sac},{label:"Price",value:priceTotal,color:C.price},{label:"Consórcio",value:consTotal,color:C.cons}];
-  const sacSintTotal=(sacSint.totals.totalPaid||0)+entrada+fgts;
-  const minT=Math.min(...totaisList.map(t=>t.value),sacSintTotal);
+  const minT=Math.min(...totaisList.map(t=>t.value));
 
   // Toggle de visibilidade das linhas nos gráficos
-  const [visibleLines,setVisibleLines]=useState({SAC:true,Price:true,"Consórcio":true,"SAC+":true,"Price+":true,"SAC Sint.":true});
+  const [visibleLines,setVisibleLines]=useState({SAC:true,Price:true,"Consórcio":true,"SAC+":true,"Price+":true});
   const toggleLine=(name)=>setVisibleLines(v=>({...v,[name]:!v[name]}));
 
   // Legenda customizada clicável
@@ -1237,8 +1169,7 @@ export default function App() {
     "Consórcio":cons.rows[i]?.installment>0?cons.rows[i].installment:null,
     "SAC+":sacAmortInst(i),
     "Price+":priceAmortInst(i),
-    "SAC Sint.":sacSint.rows[i]?sacSint.rows[i].totalMensal:null,
-  })),[sac.rows,price.rows,cons.rows,sacAmort,priceAmort,sacSint,maxM,amortEfeito]);
+  })),[sac.rows,price.rows,cons.rows,sacAmort,priceAmort,maxM,amortEfeito]);
 
   const chartDesembolsoEx=useMemo(()=>{
     let ac=0;
@@ -1373,19 +1304,15 @@ export default function App() {
 
         {/* DESTAQUES */}
         {(()=>{
-          const sacSintAmortTotal=sacSintAmort?(sacSintAmort.totals.totalPaid||0)+entrada+fgts:null;
           const cols=[
             {id:"sac",  label:"SAC",        value:sacTotal,        color:C.sac,   pFirst:st.installFirst,  pLast:st.installLast,  extra:null,
              amortData:sacAmort,  amortTotal:sacAmort?(sacAmort.totals.totalPaid||0)+entrada+fgts:null},
             {id:"price",label:"Price",       value:priceTotal,      color:C.price, pFirst:pt.installFirst,  pLast:pt.installLast,  extra:null,
              amortData:priceAmort,amortTotal:priceAmort?(priceAmort.totals.totalPaid||0)+entrada+fgts:null},
-            {id:"sint", label:"SAC Sint.",   value:sacSintTotal,    color:"#7c3aed",pFirst:sacSint.totals.installFirst,pLast:sacSint.totals.installLast,
-             extra:`Encerra mês ${sacSint.totals.prazoEfetivo} (-${sacSint.totals.mesesEconomizados})`,
-             amortData:sacSintAmort,amortTotal:sacSintAmortTotal},
             {id:"cons", label:"Consórcio",   value:consTotal,       color:C.cons,  pFirst:ct.installFirst,  pLast:ct.installLast,  extra:null,
              amortData:null,amortTotal:null},
           ];
-          const allVals=[sacTotal,priceTotal,sacSintTotal,consTotal];
+          const allVals=[sacTotal,priceTotal,consTotal];
           const minV=Math.min(...allVals);
           const renderCard=(t,isAmort)=>{
             const val=isAmort?t.amortTotal:t.value;
@@ -1421,7 +1348,7 @@ export default function App() {
                   {isAmort&&(
                     <div style={{display:"flex",justifyContent:"space-between",fontSize:11,fontFamily:F.body,marginTop:5,paddingTop:5,borderTop:`1px solid ${C.border}`}}>
                       <span style={{color:C.muted}}>Juros econ.</span>
-                      <span style={{fontWeight:600,color:C.accent}}>{brl((t.id==="sac"?st.totalInterest:t.id==="price"?pt.totalInterest:sacSint.totals.totalInterest)-(t.amortData.totals.totalInterest||0))}</span>
+                      <span style={{fontWeight:600,color:C.accent}}>{brl((t.id==="sac"?st.totalInterest:pt.totalInterest)-(t.amortData.totals.totalInterest||0))}</span>
                     </div>
                   )}
                 </div>
@@ -1471,7 +1398,6 @@ export default function App() {
               <Line type="monotone" dataKey="Consórcio" stroke={C.cons} strokeWidth={2.5} dot={false} strokeLinecap="round" hide={!visibleLines["Consórcio"]}/>
               {amortAtiva&&<Line type="monotone" dataKey="SAC+" stroke={C.sac} strokeWidth={2} strokeDasharray="6 3" dot={false} hide={!visibleLines["SAC+"]} connectNulls={false}/>}
               {amortAtiva&&<Line type="monotone" dataKey="Price+" stroke={C.price} strokeWidth={2} strokeDasharray="6 3" dot={false} hide={!visibleLines["Price+"]} connectNulls={false}/>}
-              <Line type="monotone" dataKey="SAC Sint." stroke="#7c3aed" strokeWidth={2} strokeDasharray="4 2" dot={false} hide={!visibleLines["SAC Sint."]} connectNulls={false}/>
             </LineChart>
           </ResponsiveContainer>
         </ChartCard>
