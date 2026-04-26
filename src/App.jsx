@@ -251,9 +251,13 @@ function calcPriceAmort(principal,rM,trM,months,amortMensal,amortAnual,mesAnual,
 // Amort extra = max(instSACoriginal - instPriceOriginal, 0)
 // Efeito: reduz prazo → encerra muito antes de months
 function calcSacSintetica(principal,rM,trM,months,sacRows) {
+  return calcSacSinteticaAmort(principal,rM,trM,months,sacRows,0,0,12,"prazo","todo_ano",1);
+}
+
+// SAC Sintética + amortizações extraordinárias adicionais
+function calcSacSinteticaAmort(principal,rM,trM,months,sacRows,amortMensal,amortAnual,mesAnual,efeito,periodicidade,anoUnico) {
   if(principal<=0||months<=0||!sacRows?.length) return {rows:[],totals:{}};
 
-  // Pré-calcula PMTs originais do Price (sem extra) para manter parcela estável
   const priceOriginais=[];
   let b2=principal;
   for(let i=0;i<months;i++){
@@ -276,10 +280,16 @@ function calcSacSintetica(principal,rM,trM,months,sacRows) {
     const amort=Math.max(installment-interest,0);
     bal=Math.max(bal-amort,0);
     cumInstall+=installment; cumInterest+=interest; cumTR+=tr;
-    // Amort extra = diferença SAC original - Price original (só quando positiva)
+    // Diferença SAC - Price (amort base da estratégia)
     const instSac=sacRows[i]?.installment||0;
     const diff=Math.max(instSac-installment,0);
-    const extra=Math.min(diff,bal);
+    // Amortizações extraordinárias adicionais
+    const mNorm=m%12===0?12:m%12;
+    const mesNorm=(mesAnual||12)%12===0?12:(mesAnual||12)%12;
+    const anoAtual=Math.ceil(m/12);
+    const isAnual=amortAnual>0&&mNorm===mesNorm&&(periodicidade==="uma_vez"?(anoAtual===(anoUnico||1)):true);
+    const extraAdicional=(amortMensal||0)+(isAnual?(amortAnual||0):0);
+    const extra=Math.min(diff+extraAdicional,bal);
     bal=Math.max(bal-extra,0);
     cumAmortExtra+=extra;
     rows.push({month:m,installment,instSac,amortExtra:extra,bal,
@@ -1112,6 +1122,7 @@ export default function App() {
   const sacAmort=useMemo(()=>amortAtiva?calcSacAmort(principal,rM,trM,prazoFin,amortMensal,amortAnual,amortMesAnual,amortEfeito,amortPeriodicidade,amortAno):null,[principal,rM,trM,prazoFin,amortMensal,amortAnual,amortMesAnual,amortEfeito,amortAtiva,amortPeriodicidade,amortAno]);
   const priceAmort=useMemo(()=>amortAtiva?calcPriceAmort(principal,rM,trM,prazoFin,amortMensal,amortAnual,amortMesAnual,amortEfeito,amortPeriodicidade,amortAno):null,[principal,rM,trM,prazoFin,amortMensal,amortAnual,amortMesAnual,amortEfeito,amortAtiva,amortPeriodicidade,amortAno]);
   const sacSint=useMemo(()=>calcSacSintetica(principal,rM,trM,prazoFin,sac.rows),[principal,rM,trM,prazoFin,sac.rows]);
+  const sacSintAmort=useMemo(()=>amortAtiva?calcSacSinteticaAmort(principal,rM,trM,prazoFin,sac.rows,amortMensal,amortAnual,amortMesAnual,amortEfeito,amortPeriodicidade,amortAno):null,[principal,rM,trM,prazoFin,sac.rows,amortMensal,amortAnual,amortMesAnual,amortEfeito,amortAtiva,amortPeriodicidade,amortAno]);
 
   const st=sac.totals,pt=price.totals,ct=cons.totals;
   const aluguelMensal=Number(aluguel)||0;
@@ -1314,52 +1325,7 @@ export default function App() {
                       ))}
                     </div>
                   </div>
-                  {/* Resumo do impacto */}
-                  {/* CARD AMORT+ LADO A LADO */}
-                  {amortAtiva&&(sacAmort||priceAmort)&&(
-                    <div style={{marginTop:4}}>
-                      <div style={{fontSize:11,fontWeight:700,color:C.muted,textTransform:"uppercase",letterSpacing:"0.07em",marginBottom:8}}>Resultado com amortização</div>
-                      <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8}}>
-                        {[
-                          {label:"SAC+",data:sacAmort,base:sac,color:C.sac},
-                          {label:"Price+",data:priceAmort,base:price,color:C.price},
-                        ].map((item,i)=>item.data&&(
-                          <div key={i} style={{borderRadius:10,padding:"10px 12px",background:"#eff6ff",border:`1.5px solid ${item.color}22`}}>
-                            <div style={{fontSize:11,fontWeight:700,color:item.color,marginBottom:6,textTransform:"uppercase",letterSpacing:"0.06em"}}>{item.label}</div>
-                            <div style={{fontSize:12,fontFamily:F.body,lineHeight:1.9}}>
-                              <div style={{display:"flex",justifyContent:"space-between"}}>
-                                <span style={{color:C.muted}}>Total desembolsado</span>
-                                <strong style={{color:C.text}}>{brl((item.data.totals.totalPaid||0)+entrada+fgts)}</strong>
-                              </div>
-                              <div style={{display:"flex",justifyContent:"space-between"}}>
-                                <span style={{color:C.muted}}>Parcela inicial</span>
-                                <strong style={{color:C.text}}>{brl(item.data.totals.installFirst)}</strong>
-                              </div>
-                              <div style={{display:"flex",justifyContent:"space-between"}}>
-                                <span style={{color:C.muted}}>Parcela final</span>
-                                <strong style={{color:C.text}}>{brl(item.data.totals.installLast)}</strong>
-                              </div>
-                              {amortEfeito==="prazo"&&(
-                                <div style={{display:"flex",justifyContent:"space-between"}}>
-                                  <span style={{color:C.muted}}>Prazo</span>
-                                  <strong style={{color:C.accent}}>{item.data.totals.prazoEfetivo} meses <span style={{fontSize:10}}>(-{item.data.totals.mesesEconomizados})</span></strong>
-                                </div>
-                              )}
-                              {amortEfeito==="prazo"&&item.data.totals.mesesEconomizados>0&&(
-                                <div style={{fontSize:10,color:C.accent,marginTop:2,fontWeight:600}}>
-                                  ✓ Encerra no mês {item.data.totals.prazoEfetivo}
-                                </div>
-                              )}
-                              <div style={{display:"flex",justifyContent:"space-between",borderTop:`1px solid ${C.border}`,marginTop:4,paddingTop:4}}>
-                                <span style={{color:C.muted}}>Juros economizados</span>
-                                <strong style={{color:C.accent}}>{brl((item.base.totals.totalInterest||0)-(item.data.totals.totalInterest||0))}</strong>
-                              </div>
-                            </div>
-                          </div>
-                        ))}
-                      </div>
-                    </div>
-                  )}
+                  <div>
                 </div>
               )}
             </div>
@@ -1407,39 +1373,79 @@ export default function App() {
         })()}
 
         {/* DESTAQUES */}
-        <div style={{background:C.panel,border:`1px solid ${C.border}`,borderRadius:16,padding:20,boxShadow:"0 2px 12px rgba(0,0,0,0.04)",marginBottom:24}}>
-          <div style={{fontSize:11,fontWeight:700,color:C.muted,textTransform:"uppercase",letterSpacing:"0.08em",marginBottom:14,fontFamily:F.body}}>Total desembolsado</div>
-          <div className="sim-hl-cols" style={{display:"flex",gap:12}}>
-            {[
-              {label:"SAC",value:sacTotal,color:C.sac,pFirst:st.installFirst,pLast:st.installLast},
-              {label:"Price",value:priceTotal,color:C.price,pFirst:pt.installFirst,pLast:pt.installLast},
-              {label:"Consórcio",value:consTotal,color:C.cons,pFirst:ct.installFirst,pLast:ct.installLast},
-              {label:"SAC Sint.",value:sacSintTotal,color:"#7c3aed",
-               pFirst:sacSint.totals.installFirst,pLast:sacSint.totals.installLast,
-               extra:`Encerra mês ${sacSint.totals.prazoEfetivo} (-${sacSint.totals.mesesEconomizados})`},
-            ].map((t,i)=>{
-              const isMin=t.value===minT;
-              return (
-                <div key={i} style={{flex:1,borderRadius:12,padding:"16px 14px",textAlign:"center",background:isMin?C.accentBg:"#fafcfa",border:`1.5px solid ${isMin?C.accent:C.border}`}}>
-                  <div style={{fontSize:11,fontWeight:700,color:t.color,marginBottom:8,textTransform:"uppercase",letterSpacing:"0.06em",fontFamily:F.body}}>{t.label}</div>
-                  <div style={{fontSize:22,fontWeight:700,color:isMin?C.accent:C.text,fontFamily:F.display,lineHeight:1.1}}>{brl(t.value)}</div>
-                  {isMin&&<div style={{fontSize:10,color:C.accent,marginTop:5,fontWeight:700}}>✓ menor</div>}
-                  <div style={{marginTop:12,paddingTop:10,borderTop:`1px solid ${isMin?C.borderMid:C.border}`}}>
-                    <div style={{display:"flex",justifyContent:"space-between",fontSize:12,fontFamily:F.body,marginBottom:4}}>
-                      <span style={{color:C.muted}}>Parcela inicial</span>
-                      <span style={{fontWeight:500,color:C.text}}>{brl(t.pFirst)}</span>
-                    </div>
-                    <div style={{display:"flex",justifyContent:"space-between",fontSize:12,fontFamily:F.body}}>
-                      <span style={{color:C.muted}}>Parcela final</span>
-                      <span style={{fontWeight:500,color:C.text}}>{brl(t.pLast)}</span>
-                    </div>
-                    {t.extra&&<div style={{marginTop:6,fontSize:11,color:t.color,fontWeight:600}}>{t.extra}</div>}
-                  </div>
+        {(()=>{
+          const sacSintTotal=(sacSint.totals.totalPaid||0)+entrada+fgts;
+          const sacSintAmortTotal=sacSintAmort?(sacSintAmort.totals.totalPaid||0)+entrada+fgts:null;
+          const cols=[
+            {id:"sac",  label:"SAC",        value:sacTotal,        color:C.sac,   pFirst:st.installFirst,  pLast:st.installLast,  extra:null,
+             amortData:sacAmort,  amortTotal:sacAmort?(sacAmort.totals.totalPaid||0)+entrada+fgts:null},
+            {id:"price",label:"Price",       value:priceTotal,      color:C.price, pFirst:pt.installFirst,  pLast:pt.installLast,  extra:null,
+             amortData:priceAmort,amortTotal:priceAmort?(priceAmort.totals.totalPaid||0)+entrada+fgts:null},
+            {id:"sint", label:"SAC Sint.",   value:sacSintTotal,    color:"#7c3aed",pFirst:sacSint.totals.installFirst,pLast:sacSint.totals.installLast,
+             extra:`Encerra mês ${sacSint.totals.prazoEfetivo} (-${sacSint.totals.mesesEconomizados})`,
+             amortData:sacSintAmort,amortTotal:sacSintAmortTotal},
+            {id:"cons", label:"Consórcio",   value:consTotal,       color:C.cons,  pFirst:ct.installFirst,  pLast:ct.installLast,  extra:null,
+             amortData:null,amortTotal:null},
+          ];
+          const allVals=[sacTotal,priceTotal,sacSintTotal,consTotal];
+          const minV=Math.min(...allVals);
+          const renderCard=(t,isAmort)=>{
+            const val=isAmort?t.amortTotal:t.value;
+            const pFirst=isAmort?t.amortData?.totals?.installFirst:t.pFirst;
+            const pLast=isAmort?t.amortData?.totals?.installLast:t.pLast;
+            const prazo=isAmort&&t.amortData?.totals;
+            const isMin=val===minV&&!isAmort;
+            const bg=isMin?C.accentBg:isAmort?"#fafcff":"#fafcfa";
+            const bdr=isMin?C.accent:isAmort?`${t.color}44`:C.border;
+            if(isAmort&&!t.amortData) return <div key={t.id+"a"} style={{flex:1}}/>;
+            return (
+              <div key={t.id+(isAmort?"a":"")} style={{flex:1,borderRadius:12,padding:"14px 12px",textAlign:"center",background:bg,border:`1.5px solid ${bdr}`}}>
+                <div style={{fontSize:10,fontWeight:700,color:t.color,marginBottom:6,textTransform:"uppercase",letterSpacing:"0.06em",fontFamily:F.body}}>
+                  {isAmort?t.label+" +amort.":t.label}
                 </div>
-              );
-            })}
-          </div>
-        </div>
+                {val!=null&&<div style={{fontSize:isAmort?16:20,fontWeight:700,color:isMin?C.accent:C.text,fontFamily:F.display,lineHeight:1.1}}>{brl(val)}</div>}
+                {isMin&&<div style={{fontSize:10,color:C.accent,marginTop:4,fontWeight:700}}>✓ menor</div>}
+                <div style={{marginTop:10,paddingTop:8,borderTop:`1px solid ${isMin?C.borderMid:C.border}`}}>
+                  <div style={{display:"flex",justifyContent:"space-between",fontSize:11,fontFamily:F.body,marginBottom:3}}>
+                    <span style={{color:C.muted}}>Parcela inicial</span>
+                    <span style={{fontWeight:500,color:C.text}}>{brl(pFirst)}</span>
+                  </div>
+                  <div style={{display:"flex",justifyContent:"space-between",fontSize:11,fontFamily:F.body}}>
+                    <span style={{color:C.muted}}>Parcela final</span>
+                    <span style={{fontWeight:500,color:C.text}}>{brl(pLast)}</span>
+                  </div>
+                  {!isAmort&&t.extra&&<div style={{marginTop:5,fontSize:10,color:t.color,fontWeight:600}}>{t.extra}</div>}
+                  {isAmort&&prazo&&amortEfeito==="prazo"&&prazo.mesesEconomizados>0&&(
+                    <div style={{marginTop:5,fontSize:10,color:t.color,fontWeight:600}}>
+                      Encerra mês {prazo.prazoEfetivo} (-{prazo.mesesEconomizados})
+                    </div>
+                  )}
+                  {isAmort&&(
+                    <div style={{display:"flex",justifyContent:"space-between",fontSize:11,fontFamily:F.body,marginTop:5,paddingTop:5,borderTop:`1px solid ${C.border}`}}>
+                      <span style={{color:C.muted}}>Juros econ.</span>
+                      <span style={{fontWeight:600,color:C.accent}}>{brl((t.id==="sac"?st.totalInterest:t.id==="price"?pt.totalInterest:sacSint.totals.totalInterest)-(t.amortData.totals.totalInterest||0))}</span>
+                    </div>
+                  )}
+                </div>
+              </div>
+            );
+          };
+          return (
+            <div style={{background:C.panel,border:`1px solid ${C.border}`,borderRadius:16,padding:20,boxShadow:"0 2px 12px rgba(0,0,0,0.04)",marginBottom:24}}>
+              <div style={{fontSize:11,fontWeight:700,color:C.muted,textTransform:"uppercase",letterSpacing:"0.08em",marginBottom:14,fontFamily:F.body}}>Total desembolsado</div>
+              {/* Linha 1: cards principais */}
+              <div className="sim-hl-cols" style={{display:"flex",gap:10,marginBottom:amortAtiva?10:0}}>
+                {cols.map(t=>renderCard(t,false))}
+              </div>
+              {/* Linha 2: cards com amortização (quando ativa) */}
+              {amortAtiva&&(
+                <div className="sim-hl-cols" style={{display:"flex",gap:10}}>
+                  {cols.map(t=>renderCard(t,true))}
+                </div>
+              )}
+            </div>
+          );
+        })()}
 
 
 
@@ -1467,7 +1473,7 @@ export default function App() {
               <Line type="monotone" dataKey="Consórcio" stroke={C.cons} strokeWidth={2.5} dot={false} strokeLinecap="round" hide={!visibleLines["Consórcio"]}/>
               {amortAtiva&&<Line type="monotone" dataKey="SAC+" stroke={C.sac} strokeWidth={2} strokeDasharray="6 3" dot={false} hide={!visibleLines["SAC+"]} connectNulls={false}/>}
               {amortAtiva&&<Line type="monotone" dataKey="Price+" stroke={C.price} strokeWidth={2} strokeDasharray="6 3" dot={false} hide={!visibleLines["Price+"]} connectNulls={false}/>}
-              <Line type="monotone" dataKey="SAC Sint." stroke="#7c3aed" strokeWidth={2} strokeDasharray="4 2" dot={false} hide={!visibleLines["SAC Sint."]} connectNulls={false}/>}
+              <Line type="monotone" dataKey="SAC Sint." stroke="#7c3aed" strokeWidth={2} strokeDasharray="4 2" dot={false} hide={!visibleLines["SAC Sint."]} connectNulls={false}/>
             </LineChart>
           </ResponsiveContainer>
         </ChartCard>
