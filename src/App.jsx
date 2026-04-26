@@ -245,6 +245,61 @@ function calcPriceAmort(principal,rM,trM,months,amortMensal,amortAnual,mesAnual,
   }};
 }
 
+// ─── CALC: SAC SINTÉTICA ──────────────────────────────────────────────────────
+// Contrata Price mas amortiza mensalmente a diferença (SAC - Price) quando positiva
+// Parcela mensal do cliente = parcela Price original (não muda)
+// Amort extra = max(instSACoriginal - instPriceOriginal, 0)
+// Efeito: reduz prazo → encerra muito antes de months
+function calcSacSintetica(principal,rM,trM,months,sacRows) {
+  if(principal<=0||months<=0||!sacRows?.length) return {rows:[],totals:{}};
+
+  // Pré-calcula PMTs originais do Price (sem extra) para manter parcela estável
+  const priceOriginais=[];
+  let b2=principal;
+  for(let i=0;i<months;i++){
+    const rem=months-i;
+    const tr=b2*trM; b2+=tr;
+    const inst=pmtFn(b2,rM,rem);
+    priceOriginais.push(inst);
+    b2=Math.max(b2-Math.max(inst-b2*rM,0),0);
+  }
+
+  let bal=principal,cumInstall=0,cumInterest=0,cumTR=0,cumAmortExtra=0;
+  const rows=[];
+
+  for(let i=0;i<months;i++){
+    if(bal<0.01) break;
+    const m=i+1;
+    const tr=bal*trM; bal+=tr;
+    const interest=bal*rM;
+    const installment=priceOriginais[i]||0;
+    const amort=Math.max(installment-interest,0);
+    bal=Math.max(bal-amort,0);
+    cumInstall+=installment; cumInterest+=interest; cumTR+=tr;
+    // Amort extra = diferença SAC original - Price original (só quando positiva)
+    const instSac=sacRows[i]?.installment||0;
+    const diff=Math.max(instSac-installment,0);
+    const extra=Math.min(diff,bal);
+    bal=Math.max(bal-extra,0);
+    cumAmortExtra+=extra;
+    rows.push({month:m,installment,instSac,amortExtra:extra,bal,
+      cumInstall,cumInterest,cumTR,cumAmortExtra,
+      totalMensal:installment+extra});
+    if(bal<0.01) break;
+  }
+
+  const last=rows[rows.length-1]||{};
+  return {rows,totals:{
+    installFirst:rows[0]?.totalMensal||0,
+    installLast:rows[rows.length-1]?.totalMensal||0,
+    totalInterest:last.cumInterest||0,
+    totalTR:last.cumTR||0,
+    totalPaid:(last.cumInstall||0)+(last.cumAmortExtra||0),
+    prazoEfetivo:rows.length,
+    mesesEconomizados:months-rows.length,
+  }};
+}
+
 // ─── CALC: CONSÓRCIO ──────────────────────────────────────────────────────────
 /**
  * Sem promoção:
@@ -1056,6 +1111,7 @@ export default function App() {
 
   const sacAmort=useMemo(()=>amortAtiva?calcSacAmort(principal,rM,trM,prazoFin,amortMensal,amortAnual,amortMesAnual,amortEfeito,amortPeriodicidade,amortAno):null,[principal,rM,trM,prazoFin,amortMensal,amortAnual,amortMesAnual,amortEfeito,amortAtiva,amortPeriodicidade,amortAno]);
   const priceAmort=useMemo(()=>amortAtiva?calcPriceAmort(principal,rM,trM,prazoFin,amortMensal,amortAnual,amortMesAnual,amortEfeito,amortPeriodicidade,amortAno):null,[principal,rM,trM,prazoFin,amortMensal,amortAnual,amortMesAnual,amortEfeito,amortAtiva,amortPeriodicidade,amortAno]);
+  const sacSint=useMemo(()=>calcSacSintetica(principal,rM,trM,prazoFin,sac.rows),[principal,rM,trM,prazoFin,sac.rows]);
 
   const st=sac.totals,pt=price.totals,ct=cons.totals;
   const aluguelMensal=Number(aluguel)||0;
@@ -1109,10 +1165,11 @@ export default function App() {
   }), [carta, prazoCons, admin, fundo, idxM, lance, promoDesc, promoMeses, cenariosMeses.join()]);
 
   const totaisList=[{label:"SAC",value:sacTotal,color:C.sac},{label:"Price",value:priceTotal,color:C.price},{label:"Consórcio",value:consTotal,color:C.cons}];
-  const minT=Math.min(...totaisList.map(t=>t.value));
+  const sacSintTotal=(sacSint.totals.totalPaid||0)+entrada+fgts;
+  const minT=Math.min(...totaisList.map(t=>t.value),sacSintTotal);
 
   // Toggle de visibilidade das linhas nos gráficos
-  const [visibleLines,setVisibleLines]=useState({SAC:true,Price:true,"Consórcio":true,"SAC+":true,"Price+":true});
+  const [visibleLines,setVisibleLines]=useState({SAC:true,Price:true,"Consórcio":true,"SAC+":true,"Price+":true,"SAC Sint.":true});
   const toggleLine=(name)=>setVisibleLines(v=>({...v,[name]:!v[name]}));
 
   // Legenda customizada clicável
@@ -1169,7 +1226,8 @@ export default function App() {
     "Consórcio":cons.rows[i]?.installment>0?cons.rows[i].installment:null,
     "SAC+":sacAmortInst(i),
     "Price+":priceAmortInst(i),
-  })),[sac.rows,price.rows,cons.rows,sacAmort,priceAmort,maxM,amortEfeito]);
+    "SAC Sint.":sacSint.rows[i]?sacSint.rows[i].totalMensal:null,
+  })),[sac.rows,price.rows,cons.rows,sacAmort,priceAmort,sacSint,maxM,amortEfeito]);
 
   const chartDesembolsoEx=useMemo(()=>{
     let ac=0;
@@ -1356,6 +1414,9 @@ export default function App() {
               {label:"SAC",value:sacTotal,color:C.sac,pFirst:st.installFirst,pLast:st.installLast},
               {label:"Price",value:priceTotal,color:C.price,pFirst:pt.installFirst,pLast:pt.installLast},
               {label:"Consórcio",value:consTotal,color:C.cons,pFirst:ct.installFirst,pLast:ct.installLast},
+              {label:"SAC Sint.",value:sacSintTotal,color:"#7c3aed",
+               pFirst:sacSint.totals.installFirst,pLast:sacSint.totals.installLast,
+               extra:`Encerra mês ${sacSint.totals.prazoEfetivo} (-${sacSint.totals.mesesEconomizados})`},
             ].map((t,i)=>{
               const isMin=t.value===minT;
               return (
@@ -1372,6 +1433,7 @@ export default function App() {
                       <span style={{color:C.muted}}>Parcela final</span>
                       <span style={{fontWeight:500,color:C.text}}>{brl(t.pLast)}</span>
                     </div>
+                    {t.extra&&<div style={{marginTop:6,fontSize:11,color:t.color,fontWeight:600}}>{t.extra}</div>}
                   </div>
                 </div>
               );
@@ -1405,6 +1467,7 @@ export default function App() {
               <Line type="monotone" dataKey="Consórcio" stroke={C.cons} strokeWidth={2.5} dot={false} strokeLinecap="round" hide={!visibleLines["Consórcio"]}/>
               {amortAtiva&&<Line type="monotone" dataKey="SAC+" stroke={C.sac} strokeWidth={2} strokeDasharray="6 3" dot={false} hide={!visibleLines["SAC+"]} connectNulls={false}/>}
               {amortAtiva&&<Line type="monotone" dataKey="Price+" stroke={C.price} strokeWidth={2} strokeDasharray="6 3" dot={false} hide={!visibleLines["Price+"]} connectNulls={false}/>}
+              <Line type="monotone" dataKey="SAC Sint." stroke="#7c3aed" strokeWidth={2} strokeDasharray="4 2" dot={false} hide={!visibleLines["SAC Sint."]} connectNulls={false}/>}
             </LineChart>
           </ResponsiveContainer>
         </ChartCard>
