@@ -4,10 +4,10 @@ import {
   ResponsiveContainer, Legend, ReferenceLine,
 } from "recharts";
 
-// ─── FONTS ──────────────────────────────────────────────── v2.3 ──────────────
+// ─── FONTS ──────────────────────────────────────────────── v3.0 dark ─────────
 const fontLink = document.createElement("link");
 fontLink.rel = "stylesheet";
-fontLink.href = "https://fonts.googleapis.com/css2?family=Fraunces:wght@600;700&family=DM+Sans:wght@300;400;500;600&display=swap";
+fontLink.href = "https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@300;400;500;600&display=swap";
 document.head.appendChild(fontLink);
 
 const styleEl = document.createElement("style");
@@ -24,19 +24,35 @@ styleEl.textContent = `
   }
   .sim-number { transition: color 0.3s ease; }
   .sim-card { transition: box-shadow 0.2s ease; }
-  .sim-card:hover { box-shadow: 0 4px 20px rgba(0,0,0,0.08) !important; }
+  .sim-card:hover { box-shadow: 0 4px 20px rgba(0,0,0,0.4) !important; }
+  input[type=number]::-webkit-inner-spin-button { -webkit-appearance: none; }
+  input:focus { outline: none; }
+  button { cursor: pointer; }
 `;
 document.head.appendChild(styleEl);
 
 // ─── THEME ────────────────────────────────────────────────────────────────────
 const C = {
-  bg:"#f7f9f7", panel:"#ffffff", border:"#e4ede4", borderMid:"#c8dcc8",
-  text:"#1a2e1a", muted:"#6b7f6b", soft:"#f0f6f0",
-  sac:"#1d6fa4", price:"#c2651a", cons:"#1e7a3e",
-  accent:"#2d9e50", accentBg:"#edf7f0", accentHl:"#d1f0db",
-  goldBg:"#fdf8ec",
+  bg:       "#0d0d0d",
+  panel:    "#141414",
+  panel2:   "#1c1c1c",
+  border:   "#2e2e2e",
+  borderMid:"#3a3a3a",
+  text:     "#f5f3ee",
+  muted:    "#c8c4bc",
+  soft:     "#1a1a1a",
+  // accent principal
+  accent:   "#a3e635",
+  accentBg: "rgba(163,230,53,0.07)",
+  accentHl: "rgba(163,230,53,0.12)",
+  // cores das modalidades
+  sac:      "#60a5fa",   // azul
+  price:    "#fb923c",   // laranja
+  cons:     "#4ade80",   // verde
+  // feedback
+  goldBg:   "#1c1a10",
 };
-const F = { display:"'Fraunces', Georgia, serif", body:"'DM Sans', system-ui, sans-serif" };
+const F = { body: "'JetBrains Mono', monospace" };
 
 // ─── FORMATTERS ───────────────────────────────────────────────────────────────
 const brl = (v) => new Intl.NumberFormat("pt-BR",{style:"currency",currency:"BRL"}).format(Number(v)||0);
@@ -87,8 +103,6 @@ function calcPrice(principal,rM,trM,months) {
 // ─── CALC: SAC COM AMORTIZAÇÃO EXTRAORDINÁRIA ─────────────────────────────────
 function calcSacAmort(principal,rM,trM,months,amortMensal,amortAnual,mesAnual,efeito,periodicidade,anoUnico) {
   if(principal<=0||months<=0) return {rows:[],totals:{}};
-
-  // Pré-calcula parcelas originais apenas para modo PRAZO
   const instOriginais=[];
   if(efeito==="prazo"){
     let b2=principal;
@@ -100,78 +114,46 @@ function calcSacAmort(principal,rM,trM,months,amortMensal,amortAnual,mesAnual,ef
       b2=Math.max(b2-amort,0);
     }
   }
-
   let bal=principal,cumInstall=0,cumInterest=0,cumTR=0,cumAmortExtra=0;
   const rows=[];
-
   for(let i=0;i<months;i++){
     const m=i+1, rem=months-i;
-
-    // MODO PARCELA: loop SEMPRE vai até months. Prazo nunca muda.
-    // Quando saldo zera, parcela é 0 mas o contrato ainda existe.
-    // MODO PRAZO: loop encerra quando saldo zera.
     if(bal<0.01){
       if(efeito==="prazo") break;
-      // Parcela: preenche com 0 — contrato existe mas não há mais saldo
-      rows.push({month:m,installment:0,interest:0,tr:0,amort:0,amortExtra:0,bal:0,
-        cumInstall,cumInterest,cumTR,cumAmortExtra});
+      rows.push({month:m,installment:0,interest:0,tr:0,amort:0,amortExtra:0,bal:0,cumInstall,cumInterest,cumTR,cumAmortExtra});
       continue;
     }
-
     const tr=bal*trM; bal+=tr;
     const interest=bal*rM;
     let inst, amort;
-
     if(efeito==="prazo"){
-      // Mantém parcela original → amort extra faz saldo cair mais rápido → encerra antes
       inst=instOriginais[i]||0;
       amort=Math.max(inst-interest,0);
     } else {
-      // Parcela recalculada sobre saldo atual / meses nominais restantes → parcela menor
       amort=bal/rem;
       inst=amort+interest;
     }
-
     bal=Math.max(bal-amort,0);
     cumInstall+=inst; cumInterest+=interest; cumTR+=tr;
-
     const mNorm=m%12===0?12:m%12;
     const mesNorm=(mesAnual||12)%12===0?12:(mesAnual||12)%12;
     const anoAtual=Math.ceil(m/12);
-    const isAnual=amortAnual>0&&mNorm===mesNorm&&(
-      periodicidade==="uma_vez"?(anoAtual===(anoUnico||1)):true
-    );
+    const isAnual=amortAnual>0&&mNorm===mesNorm&&(periodicidade==="uma_vez"?(anoAtual===(anoUnico||1)):true);
     const extra=Math.min((amortMensal||0)+(isAnual?(amortAnual||0):0), bal);
     bal=Math.max(bal-extra,0);
     cumAmortExtra+=extra;
-
-    rows.push({month:m,installment:inst,interest,tr,amort,amortExtra:extra,bal,
-      cumInstall,cumInterest,cumTR,cumAmortExtra});
-
-    // Só encerra antes no modo PRAZO
+    rows.push({month:m,installment:inst,interest,tr,amort,amortExtra:extra,bal,cumInstall,cumInterest,cumTR,cumAmortExtra});
     if(efeito==="prazo"&&bal<0.01) break;
   }
-
   const last=rows[rows.length-1]||{};
   const validRows=rows.filter(r=>r.installment>0.01);
-  const prazoEfetivo=efeito==="prazo"?rows.length:months; // PARCELA: prazo sempre = months
-  return {rows,totals:{
-    installFirst:rows[0]?.installment||0,
-    installLast:validRows[validRows.length-1]?.installment||0,
-    totalInterest:last.cumInterest||0,
-    totalTR:last.cumTR||0,
-    totalAmort:principal,
-    totalPaid:(last.cumInstall||0)+(last.cumAmortExtra||0),
-    totalAmortExtra:last.cumAmortExtra||0,
-    prazoEfetivo,
-    mesesEconomizados:efeito==="prazo"?months-rows.length:0,
-  }};
+  const prazoEfetivo=efeito==="prazo"?rows.length:months;
+  return {rows,totals:{installFirst:rows[0]?.installment||0,installLast:validRows[validRows.length-1]?.installment||0,totalInterest:last.cumInterest||0,totalTR:last.cumTR||0,totalAmort:principal,totalPaid:(last.cumInstall||0)+(last.cumAmortExtra||0),totalAmortExtra:last.cumAmortExtra||0,prazoEfetivo,mesesEconomizados:efeito==="prazo"?months-rows.length:0}};
 }
 
 // ─── CALC: PRICE COM AMORTIZAÇÃO EXTRAORDINÁRIA ───────────────────────────────
 function calcPriceAmort(principal,rM,trM,months,amortMensal,amortAnual,mesAnual,efeito,periodicidade,anoUnico) {
   if(principal<=0||months<=0) return {rows:[],totals:{}};
-
   const instOriginais=[];
   if(efeito==="prazo"){
     let b2=principal;
@@ -184,24 +166,18 @@ function calcPriceAmort(principal,rM,trM,months,amortMensal,amortAnual,mesAnual,
       b2=Math.max(b2-amort,0);
     }
   }
-
   let bal=principal,cumInstall=0,cumInterest=0,cumTR=0,cumAmortExtra=0;
   const rows=[];
-
   for(let i=0;i<months;i++){
     const m=i+1, rem=months-i;
-
     if(bal<0.01){
       if(efeito==="prazo") break;
-      rows.push({month:m,installment:0,interest:0,tr:0,amort:0,amortExtra:0,bal:0,
-        cumInstall,cumInterest,cumTR,cumAmortExtra});
+      rows.push({month:m,installment:0,interest:0,tr:0,amort:0,amortExtra:0,bal:0,cumInstall,cumInterest,cumTR,cumAmortExtra});
       continue;
     }
-
     const tr=bal*trM; bal+=tr;
     const interest=bal*rM;
     let inst, amort;
-
     if(efeito==="prazo"){
       inst=instOriginais[i]||0;
       amort=Math.max(inst-interest,0);
@@ -209,64 +185,27 @@ function calcPriceAmort(principal,rM,trM,months,amortMensal,amortAnual,mesAnual,
       inst=pmtFn(bal,rM,rem);
       amort=Math.max(inst-interest,0);
     }
-
     bal=Math.max(bal-amort,0);
     cumInstall+=inst; cumInterest+=interest; cumTR+=tr;
-
     const mNorm=m%12===0?12:m%12;
     const mesNorm=(mesAnual||12)%12===0?12:(mesAnual||12)%12;
     const anoAtual=Math.ceil(m/12);
-    const isAnual=amortAnual>0&&mNorm===mesNorm&&(
-      periodicidade==="uma_vez"?(anoAtual===(anoUnico||1)):true
-    );
+    const isAnual=amortAnual>0&&mNorm===mesNorm&&(periodicidade==="uma_vez"?(anoAtual===(anoUnico||1)):true);
     const extra=Math.min((amortMensal||0)+(isAnual?(amortAnual||0):0), bal);
     bal=Math.max(bal-extra,0);
     cumAmortExtra+=extra;
-
-    rows.push({month:m,installment:inst,interest,tr,amort,amortExtra:extra,bal,
-      cumInstall,cumInterest,cumTR,cumAmortExtra});
-
+    rows.push({month:m,installment:inst,interest,tr,amort,amortExtra:extra,bal,cumInstall,cumInterest,cumTR,cumAmortExtra});
     if(efeito==="prazo"&&bal<0.01) break;
   }
-
   const last=rows[rows.length-1]||{};
   const validRows=rows.filter(r=>r.installment>0.01);
   const prazoEfetivo=efeito==="prazo"?rows.length:months;
-  return {rows,totals:{
-    installFirst:rows[0]?.installment||0,
-    installLast:validRows[validRows.length-1]?.installment||0,
-    totalInterest:last.cumInterest||0,
-    totalTR:last.cumTR||0,
-    totalAmort:principal,
-    totalPaid:(last.cumInstall||0)+(last.cumAmortExtra||0),
-    totalAmortExtra:last.cumAmortExtra||0,
-    prazoEfetivo,
-    mesesEconomizados:efeito==="prazo"?months-rows.length:0,
-  }};
+  return {rows,totals:{installFirst:rows[0]?.installment||0,installLast:validRows[validRows.length-1]?.installment||0,totalInterest:last.cumInterest||0,totalTR:last.cumTR||0,totalAmort:principal,totalPaid:(last.cumInstall||0)+(last.cumAmortExtra||0),totalAmortExtra:last.cumAmortExtra||0,prazoEfetivo,mesesEconomizados:efeito==="prazo"?months-rows.length:0}};
 }
 
 // ─── CALC: CONSÓRCIO ──────────────────────────────────────────────────────────
-/**
- * Sem promoção:
- *   parcela(m) = parcelaBase × fatorIdx(m) — linha contínua
- *
- * Com promoção que encerra ANTES da contemplação (promoMeses < cm):
- *   1..promoMeses: parcela reduzida
- *   No mês promoMeses+1: recalcula saldo devedor (meias não pagas + restante)
- *                        → salto para cima
- *   promoMeses+1..cm: nova parcela recalculada × fatorIdx relativo
- *   cm em diante: sem salto — já foi recalculado quando promo encerrou
- *
- * Com promoção até a contemplação (promoMeses >= cm):
- *   1..cm: parcela reduzida
- *   Na contemplação: recalcula saldo → salto para cima
- *   cm+1 em diante: nova parcela × fatorIdx
- *
- * Com lance: saldo menor na contemplação → parcela pós menor → salto para baixo
- */
 function calcConsorcio(carta,months,adminPct,fundoReservaPct,idxM,cm,lance,promoDescPct=0,promoMeses=0) {
   if(carta<=0||months<=0) return {rows:[],totals:{},meta:{}};
-
   const lanceSafe=Math.max(Number(lance)||0,0);
   const fundoCost=carta*fundoReservaPct;
   const grossTotal=carta*(1+adminPct+fundoReservaPct);
@@ -276,217 +215,145 @@ function calcConsorcio(carta,months,adminPct,fundoReservaPct,idxM,cm,lance,promo
   const promoD=Math.max(promoDescPct||0,0);
   const fatorCm=(1+idxM)**(cm-1);
   const cartaTravada=carta*fatorCm;
-
-  // Momento do recálculo:
-  // - promoM < cm: recalcula no mês promoM+1
-  // - promoM >= cm: recalcula na contemplação (cm)
   const recalcMes=promoD>0?(promoM<cm?promoM+1:cm):null;
-
-  // Simula saldo devedor mês a mês para encontrar saldo no momento do recálculo
   let saldoNoRecalc=0;
   if(recalcMes!==null){
     let s=grossTotal;
     for(let m=1;m<recalcMes;m++){
       s=s*(1+idxM);
       const p=parcelaBase*(1+idxM)**(m-1);
-      s=Math.max(s-p*( m<=promoM?( 1-promoD):1),0);
+      s=Math.max(s-p*(m<=promoM?(1-promoD):1),0);
     }
-    // Atualiza pelo indexador do mês do recálculo
     s=s*(1+idxM);
     saldoNoRecalc=s;
   }
-
-  // Parcela recalculada no momento do recálculo
-  // meses restantes a partir do recalcMes
   const mesesAposRecalc=recalcMes!==null?months-recalcMes+1:0;
-  const parcelaRecalcBase=recalcMes!==null&&mesesAposRecalc>0
-    ?saldoNoRecalc/mesesAposRecalc
-    :0;
-
-  // Lance efetivo — calculado sobre saldo na contemplação
+  const parcelaRecalcBase=recalcMes!==null&&mesesAposRecalc>0?saldoNoRecalc/mesesAposRecalc:0;
   let saldoNaCm=0;
-  if(recalcMes!==null&&promoM>=cm){
-    // promoção até contemplação: saldo na contemplação = saldoNoRecalc
-    saldoNaCm=saldoNoRecalc;
-  } else if(recalcMes!==null&&promoM<cm){
-    // recálculo antes de cm: saldo na contemplação = parcelaRecalcBase × meses restantes
-    const mesesAteContemplacao=cm-recalcMes;
-    // saldo = parcelaRecalcBase × (meses após recálculo - meses já pagos após recálculo)
-    // simplificação: saldo = parcelaRecalcBase × (months - cm)
-    saldoNaCm=parcelaRecalcBase*(months-cm);
-  } else {
-    // sem promoção: lógica original
-    saldoNaCm=Math.max(grossTotal*fatorCm-parcelaBase*fatorCm*cm,0);
-  }
+  if(recalcMes!==null&&promoM>=cm){ saldoNaCm=saldoNoRecalc; }
+  else if(recalcMes!==null&&promoM<cm){ saldoNaCm=parcelaRecalcBase*(months-cm); }
+  else { saldoNaCm=Math.max(grossTotal*fatorCm-parcelaBase*fatorCm*cm,0); }
   const lanceEfetivo=Math.min(lanceSafe,saldoNaCm);
   const saldoPos=Math.max(saldoNaCm-lanceEfetivo,0);
   const mesesPos=months-cm;
-
-  // Base pós-contemplação
-  // Com lance: recalcula sobre saldo menor
-  // Sem lance: continua da parcela recalculada (ou linha original se sem promoção)
   let parcelaPosBase;
-  if(lanceSafe>0&&mesesPos>0){
-    parcelaPosBase=saldoPos/mesesPos;
-  } else if(promoD>0){
-    // continua da parcelaRecalcBase reajustada até cm
-    const mesesDesdeRecalc=cm-recalcMes;
-    parcelaPosBase=parcelaRecalcBase*(1+idxM)**mesesDesdeRecalc;
-  } else {
-    parcelaPosBase=parcelaBase*(1+idxM)**(cm-1);
-  }
-
+  if(lanceSafe>0&&mesesPos>0){ parcelaPosBase=saldoPos/mesesPos; }
+  else if(promoD>0){ const mesesDesdeRecalc=cm-recalcMes; parcelaPosBase=parcelaRecalcBase*(1+idxM)**mesesDesdeRecalc; }
+  else { parcelaPosBase=parcelaBase*(1+idxM)**(cm-1); }
   let idxPre=0,idxPos=0,cumInstall=0;
-
   const rows=Array.from({length:months},(_,i)=>{
     const m=i+1;
     let installment,parcelaBase_m,idxAdj;
-
     if(m<=cm){
-      if(promoD>0&&m<recalcMes){
-        parcelaBase_m=parcelaBase*(1+idxM)**(m-1);
-        installment=parcelaBase_m*(1-promoD);
-      } else if(promoD>0&&m>=recalcMes){
-        parcelaBase_m=parcelaRecalcBase*(1+idxM)**(m-recalcMes);
-        installment=parcelaBase_m;
-      } else {
-        parcelaBase_m=parcelaBase*(1+idxM)**(m-1);
-        installment=parcelaBase_m;
-      }
-      // Custo do indexador pré = quanto a parcela cresceu acima da base original
-      idxAdj=Math.max(installment-parcelaBase,0);
-      idxPre+=idxAdj;
+      if(promoD>0&&m<recalcMes){ parcelaBase_m=parcelaBase*(1+idxM)**(m-1); installment=parcelaBase_m*(1-promoD); }
+      else if(promoD>0&&m>=recalcMes){ parcelaBase_m=parcelaRecalcBase*(1+idxM)**(m-recalcMes); installment=parcelaBase_m; }
+      else { parcelaBase_m=parcelaBase*(1+idxM)**(m-1); installment=parcelaBase_m; }
+      idxAdj=Math.max(installment-parcelaBase,0); idxPre+=idxAdj;
     } else {
-      parcelaBase_m=parcelaPosBase*(1+idxM)**(m-cm);
-      installment=parcelaBase_m;
-      // Custo do indexador pós = quanto paga acima da parcelaBase original
-      idxAdj=Math.max(installment-parcelaBase,0);
-      idxPos+=idxAdj;
+      parcelaBase_m=parcelaPosBase*(1+idxM)**(m-cm); installment=parcelaBase_m;
+      idxAdj=Math.max(installment-parcelaBase,0); idxPos+=idxAdj;
     }
-
     if(m===cm) cumInstall+=lanceEfetivo;
     cumInstall+=installment;
     return {month:m,installment,installmentBase:parcelaBase_m,idxAdj,cumInstall,isPos:m>cm};
   });
-
   const last=rows[rows.length-1];
-
-  return {
-    rows,
-    totals:{
-      installFirst:rows[0]?.installment||0,
-      installLast:last?.installment||0,
-      totalAdm:adminCost,
-      totalFundo:fundoCost,
-      totalIdxPre:idxPre,
-      totalIdxPos:idxPos,
-      totalPaid:last?.cumInstall||0,
-      totalAmort:cartaTravada,
-      cartaTravada,
-      lanceEfetivo,
-    },
-    meta:{cartaTravada,lanceEfetivo,adminCost,fundoCost,idxPre,idxPos,cm,promoDescPct:promoD,promoMeses:promoM},
-  };
+  return {rows,totals:{installFirst:rows[0]?.installment||0,installLast:last?.installment||0,totalAdm:adminCost,totalFundo:fundoCost,totalIdxPre:idxPre,totalIdxPos:idxPos,totalPaid:last?.cumInstall||0,totalAmort:cartaTravada,cartaTravada,lanceEfetivo},meta:{cartaTravada,lanceEfetivo,adminCost,fundoCost,idxPre,idxPos,cm,promoDescPct:promoD,promoMeses:promoM}};
 }
 
 // ─── INPUTS ───────────────────────────────────────────────────────────────────
-const iBase={width:"100%",marginTop:5,padding:"12px 14px",border:`1.5px solid ${C.border}`,borderRadius:10,fontSize:15,background:"#fff",boxSizing:"border-box",color:C.text,outline:"none",fontFamily:F.body,transition:"border-color 0.15s"};
+const iBase={width:"100%",marginTop:5,padding:"10px 12px",border:`1px solid ${C.borderMid}`,borderRadius:7,fontSize:14,background:C.panel2,boxSizing:"border-box",color:C.text,outline:"none",fontFamily:F.body,transition:"border-color 0.15s"};
 
 function InputMoney({label,value,onChange,hint}) {
-  const [d,setD]=useState(fmtCurrency(value));
-  useEffect(()=>{setD(fmtCurrency(value));},[value]);
+  const [raw,setRaw]=useState({digits:""});
+  useEffect(()=>{
+    const digits=Math.round(value*100).toString();
+    setRaw({digits});
+  },[value]);
+
+  const handleChange=(e)=>{
+    const digits=e.target.value.replace(/\D/g,"");
+    setRaw({digits});
+    const num=parseInt(digits||"0",10)/100;
+    onChange(num);
+  };
+
+  const display=(()=>{
+    const num=parseInt(raw.digits||"0",10)/100;
+    return num===0?"":num.toLocaleString("pt-BR",{minimumFractionDigits:2,maximumFractionDigits:2});
+  })();
+
   return (
     <label style={{display:"block",fontFamily:F.body}}>
-      <div style={{fontSize:12,fontWeight:600,color:C.muted,marginBottom:4,textTransform:"uppercase",letterSpacing:"0.07em"}}>{label}</div>
-      <input type="text" inputMode="numeric" value={d}
-        onChange={e=>{const n=parseDigits(e.target.value);setD(fmtCurrency(n));onChange(n);}}
-        onFocus={e=>e.target.style.borderColor=C.accent} onBlur={e=>e.target.style.borderColor=C.border}
+      <div style={{fontSize:11,fontWeight:600,color:C.muted,marginBottom:4,textTransform:"uppercase",letterSpacing:"0.07em"}}>{label}</div>
+      <input type="text" inputMode="numeric" value={display} onChange={handleChange}
+        placeholder="0,00"
+        onFocus={e=>e.target.style.borderColor=C.accent}
+        onBlur={e=>e.target.style.borderColor=C.borderMid}
         style={iBase}/>
       {hint&&<div style={{fontSize:11,color:C.muted,marginTop:3,lineHeight:1.4}}>{hint}</div>}
     </label>
   );
 }
+
 function InputPct({label,value,onChange,hint}) {
   return (
     <label style={{display:"block",fontFamily:F.body}}>
-      <div style={{fontSize:12,fontWeight:600,color:C.muted,marginBottom:4,textTransform:"uppercase",letterSpacing:"0.07em"}}>{label}</div>
+      <div style={{fontSize:11,fontWeight:600,color:C.muted,marginBottom:4,textTransform:"uppercase",letterSpacing:"0.07em"}}>{label}</div>
       <div style={{position:"relative"}}>
-        <input
-          type="number"
-          step="0.01"
-          value={value}
+        <input type="number" step="0.01" value={value}
           onChange={e=>onChange(parseFloat(e.target.value)||0)}
           onFocus={e=>{e.target.style.borderColor=C.accent;e.target.select();}}
-          onBlur={e=>e.target.style.borderColor=C.border}
+          onBlur={e=>e.target.style.borderColor=C.borderMid}
           style={{...iBase,paddingRight:32}}/>
-        <span style={{position:"absolute",right:12,top:"50%",transform:"translateY(-50%)",fontSize:14,color:C.muted,pointerEvents:"none"}}>%</span>
+        <span style={{position:"absolute",right:12,top:"50%",transform:"translateY(-50%)",fontSize:13,color:C.muted,pointerEvents:"none"}}>%</span>
       </div>
       {hint&&<div style={{fontSize:11,color:C.muted,marginTop:3,lineHeight:1.4}}>{hint}</div>}
     </label>
   );
 }
+
 function InputInt({label,value,onChange,hint}) {
   return (
     <label style={{display:"block",fontFamily:F.body}}>
-      <div style={{fontSize:12,fontWeight:600,color:C.muted,marginBottom:4,textTransform:"uppercase",letterSpacing:"0.07em"}}>{label}</div>
+      <div style={{fontSize:11,fontWeight:600,color:C.muted,marginBottom:4,textTransform:"uppercase",letterSpacing:"0.07em"}}>{label}</div>
       <input type="number" value={value}
         onChange={e=>onChange(Number(e.target.value))}
-        onFocus={e=>e.target.style.borderColor=C.accent} onBlur={e=>e.target.style.borderColor=C.border}
+        onFocus={e=>e.target.style.borderColor=C.accent}
+        onBlur={e=>e.target.style.borderColor=C.borderMid}
         style={iBase}/>
       {hint&&<div style={{fontSize:11,color:C.muted,marginTop:3,lineHeight:1.4}}>{hint}</div>}
     </label>
   );
 }
 
-// ─── UI ───────────────────────────────────────────────────────────────────────
-function InputPanel({accentColor,label,children}) {
+// ─── UI COMPONENTS ────────────────────────────────────────────────────────────
+function SectionTag({children}) {
   return (
-    <div style={{background:C.panel,borderRadius:16,border:`1px solid ${C.border}`,boxShadow:"0 2px 12px rgba(0,0,0,0.04)",overflow:"hidden"}}>
-      <div style={{background:accentColor,padding:"14px 22px"}}>
-        <span style={{fontFamily:F.display,fontSize:18,fontWeight:700,color:"#fff",letterSpacing:"-0.01em"}}>{label}</span>
-      </div>
-      <div style={{padding:22,display:"flex",flexDirection:"column",gap:16}}>{children}</div>
+    <div style={{fontSize:12,color:C.muted,letterSpacing:"0.06em",marginBottom:12,display:"flex",alignItems:"center",gap:8,fontFamily:F.body}}>
+      <span style={{color:C.borderMid}}>//</span> {children}
     </div>
   );
 }
 
-function SectionHeader({label}) {
+function InputPanel({accentColor,label,children}) {
   return (
-    <tr><td colSpan={4} style={{padding:"9px 18px",background:C.soft,fontSize:11,fontWeight:700,color:C.muted,textTransform:"uppercase",letterSpacing:"0.09em",borderBottom:`1px solid ${C.border}`,borderTop:`1px solid ${C.border}`,fontFamily:F.body}}>{label}</td></tr>
-  );
-}
-
-function Row({label,sub,sac,price,cons,hlMin,even}) {
-  const vals=[{v:sac,color:C.sac},{v:price,color:C.price},{v:cons,color:C.cons}];
-  const nums=vals.map(x=>x.v).filter(v=>typeof v==="number");
-  const minVal=hlMin&&nums.length?Math.min(...nums):null;
-  const renderVal=({v,color})=>{
-    if(v===null||v===undefined) return <span style={{color:C.border,fontSize:16}}>—</span>;
-    if(typeof v==="string") return <span style={{color:C.text}}>{v}</span>;
-    const isMin=hlMin&&v===minVal;
-    return <span style={{fontWeight:isMin?700:400,color:isMin?color:C.text}}>{brl(v)}</span>;
-  };
-  return (
-    <tr style={{background:even?"#fafcfa":"#fff"}}>
-      <td style={{padding:"13px 18px",fontSize:14,color:C.text,borderBottom:`1px solid ${C.border}`,fontFamily:F.body,width:"34%"}}>
-        <div style={{fontWeight:500}}>{label}</div>
-        {sub&&<div style={{fontSize:11,color:C.muted,marginTop:2,lineHeight:1.4}}>{sub}</div>}
-      </td>
-      {vals.map((item,i)=>(
-        <td key={i} style={{padding:"13px 18px",fontSize:14,textAlign:"center",borderBottom:`1px solid ${C.border}`,background:hlMin&&item.v===minVal?C.accentHl:"transparent",whiteSpace:"nowrap",fontFamily:F.body}}>
-          {renderVal(item)}
-        </td>
-      ))}
-    </tr>
+    <div style={{background:C.panel,borderRadius:10,border:`1px solid ${C.border}`,overflow:"hidden"}}>
+      <div style={{background:C.panel2,borderBottom:`1px solid ${C.border}`,padding:"12px 20px",display:"flex",alignItems:"center",gap:10}}>
+        <div style={{width:3,height:18,borderRadius:2,background:accentColor,flexShrink:0}}/>
+        <span style={{fontFamily:F.body,fontSize:13,fontWeight:600,color:C.text,letterSpacing:"0.03em"}}>{label}</span>
+      </div>
+      <div style={{padding:20,display:"flex",flexDirection:"column",gap:14}}>{children}</div>
+    </div>
   );
 }
 
 function ChartCard({title,subtitle,children}) {
   return (
-    <div style={{background:C.panel,border:`1px solid ${C.border}`,borderRadius:16,padding:"22px 22px 14px",boxShadow:"0 2px 12px rgba(0,0,0,0.04)",marginBottom:16}}>
-      <div style={{fontFamily:F.display,fontSize:19,fontWeight:700,color:C.text,marginBottom:4}}>{title}</div>
-      {subtitle&&<div style={{fontSize:12,color:C.muted,marginBottom:16,fontFamily:F.body,lineHeight:1.5}}>{subtitle}</div>}
-      <div style={{width:"100%",height:300}}>{children}</div>
+    <div style={{background:C.panel,border:`1px solid ${C.border}`,borderRadius:10,padding:"20px 20px 12px",marginBottom:12}}>
+      <div style={{fontFamily:F.body,fontSize:14,fontWeight:600,color:C.text,marginBottom:3}}>{title}</div>
+      {subtitle&&<div style={{fontSize:11,color:C.muted,marginBottom:14,fontFamily:F.body,lineHeight:1.5}}>{subtitle}</div>}
+      <div style={{width:"100%",height:280}}>{children}</div>
     </div>
   );
 }
@@ -494,8 +361,8 @@ function ChartCard({title,subtitle,children}) {
 const CustomTooltip=({active,payload,label})=>{
   if(!active||!payload?.length) return null;
   return (
-    <div style={{background:"#fff",border:`1px solid ${C.border}`,borderRadius:10,padding:"10px 14px",boxShadow:"0 4px 20px rgba(0,0,0,0.1)",fontFamily:F.body,fontSize:12}}>
-      <div style={{fontWeight:600,color:C.muted,marginBottom:6}}>Mês {label}</div>
+    <div style={{background:C.panel2,border:`1px solid ${C.borderMid}`,borderRadius:8,padding:"10px 14px",fontFamily:F.body,fontSize:12}}>
+      <div style={{fontWeight:600,color:C.muted,marginBottom:6,fontSize:11,letterSpacing:"0.04em"}}>MÊS {label}</div>
       {payload.map((p,i)=>(
         <div key={i} style={{display:"flex",justifyContent:"space-between",gap:16,color:p.color,marginBottom:2}}>
           <span>{p.name}</span><span style={{fontWeight:600}}>{brl(p.value)}</span>
@@ -505,57 +372,53 @@ const CustomTooltip=({active,payload,label})=>{
   );
 };
 
-// ─── HISTÓRICO COMPONENT ─────────────────────────────────────────────────────
+// ─── HISTÓRICO ────────────────────────────────────────────────────────────────
 function HistoricoTabela({sac,price,cons,cmSafe,carta,admin,fundo,prazoCons}) {
   const [open,setOpen]=useState(false);
   const [aba,setAba]=useState("SAC");
   const [modo,setModo]=useState("anual");
 
-  const thS={padding:"9px 12px",fontSize:11,fontWeight:700,textAlign:"center",color:C.muted,borderBottom:`1px solid ${C.border}`,background:C.soft,fontFamily:F.body,textTransform:"uppercase",letterSpacing:"0.07em",whiteSpace:"nowrap"};
-  const tdC=(bold,color)=>({padding:"8px 12px",fontSize:12,textAlign:"right",borderBottom:`1px solid ${C.border}`,fontFamily:F.body,fontWeight:bold?600:400,color:color||C.text,whiteSpace:"nowrap"});
-  const tdL={padding:"8px 12px",fontSize:12,textAlign:"center",borderBottom:`1px solid ${C.border}`,fontFamily:F.body,color:C.muted,whiteSpace:"nowrap"};
+  const thS={padding:"8px 12px",fontSize:10,fontWeight:600,textAlign:"center",color:C.muted,borderBottom:`1px solid ${C.border}`,background:C.panel2,fontFamily:F.body,textTransform:"uppercase",letterSpacing:"0.07em",whiteSpace:"nowrap"};
+  const tdC=(bold,color)=>({padding:"7px 12px",fontSize:12,textAlign:"right",borderBottom:`1px solid ${C.border}`,fontFamily:F.body,fontWeight:bold?600:400,color:color||C.text,whiteSpace:"nowrap"});
+  const tdL={padding:"7px 12px",fontSize:12,textAlign:"center",borderBottom:`1px solid ${C.border}`,fontFamily:F.body,color:C.muted,whiteSpace:"nowrap"};
 
-  const filterRows=(rows)=>modo==="anual"
-    ?rows.filter(r=>r.month%12===0||r.month===1||r.month===(rows.length))
-    :rows;
-
+  const filterRows=(rows)=>modo==="anual"?rows.filter(r=>r.month%12===0||r.month===1||r.month===(rows.length)):rows;
   const sacRows=filterRows(sac.rows||[]);
   const priceRows=filterRows(price.rows||[]);
   const consRows=filterRows(cons.rows||[]);
   const abas=[{id:"SAC",color:C.sac},{id:"Price",color:C.price},{id:"Consórcio",color:C.cons}];
 
   return (
-    <div style={{background:C.panel,border:`1px solid ${C.border}`,borderRadius:16,boxShadow:"0 2px 12px rgba(0,0,0,0.04)",marginBottom:16,overflow:"hidden"}}>
-      <button onClick={()=>setOpen(o=>!o)} style={{width:"100%",background:"none",border:"none",cursor:"pointer",padding:"16px 22px",display:"flex",alignItems:"center",justifyContent:"space-between",fontFamily:F.body}}>
-        <div style={{display:"flex",alignItems:"center",gap:12,flexWrap:"wrap"}}>
-          <span style={{fontFamily:F.display,fontSize:17,fontWeight:700,color:C.text}}>Histórico detalhado de parcelas</span>
-          <span style={{fontSize:12,color:C.muted}}>SAC · Price · Consórcio — amortização, juros e custos mês a mês</span>
+    <div style={{background:C.panel,border:`1px solid ${C.border}`,borderRadius:10,marginBottom:12,overflow:"hidden"}}>
+      <button onClick={()=>setOpen(o=>!o)} style={{width:"100%",background:"none",border:"none",padding:"14px 20px",display:"flex",alignItems:"center",justifyContent:"space-between",fontFamily:F.body}}>
+        <div style={{display:"flex",alignItems:"center",gap:10,flexWrap:"wrap"}}>
+          <span style={{fontSize:13,fontWeight:600,color:C.text}}>//</span>
+          <span style={{fontSize:13,fontWeight:600,color:C.text}}>Histórico detalhado de parcelas</span>
+          <span style={{fontSize:11,color:C.muted}}>SAC · Price · Consórcio</span>
         </div>
-        <span style={{fontSize:18,color:C.muted,transition:"transform 0.2s",display:"block",transform:open?"rotate(180deg)":"rotate(0deg)"}}>▾</span>
+        <span style={{fontSize:16,color:C.muted,transition:"transform 0.2s",display:"block",transform:open?"rotate(180deg)":"rotate(0deg)"}}>▾</span>
       </button>
-
       {open&&(
         <div>
-          <div style={{padding:"0 22px 14px",display:"flex",alignItems:"center",justifyContent:"space-between",flexWrap:"wrap",gap:10,borderBottom:`1px solid ${C.border}`}}>
+          <div style={{padding:"0 20px 12px",display:"flex",alignItems:"center",justifyContent:"space-between",flexWrap:"wrap",gap:8,borderBottom:`1px solid ${C.border}`}}>
             <div style={{display:"flex",gap:6}}>
               {abas.map(a=>(
-                <button key={a.id} onClick={()=>setAba(a.id)} style={{padding:"6px 16px",borderRadius:8,border:`1.5px solid ${aba===a.id?a.color:C.border}`,background:aba===a.id?a.color:"#fff",color:aba===a.id?"#fff":C.muted,fontFamily:F.body,fontSize:12,fontWeight:600,cursor:"pointer",transition:"all 0.15s"}}>
+                <button key={a.id} onClick={()=>setAba(a.id)} style={{padding:"5px 14px",borderRadius:6,border:`1px solid ${aba===a.id?a.color:C.border}`,background:aba===a.id?`rgba(${a.id==="SAC"?"96,165,250":a.id==="Price"?"251,146,60":"74,222,128"},0.1)`:"transparent",color:aba===a.id?a.color:C.muted,fontFamily:F.body,fontSize:11,fontWeight:600,transition:"all 0.15s"}}>
                   {a.id}
                 </button>
               ))}
             </div>
             <div style={{display:"flex",gap:6}}>
               {["anual","mensal"].map(m=>(
-                <button key={m} onClick={()=>setModo(m)} style={{padding:"6px 14px",borderRadius:8,border:`1.5px solid ${modo===m?C.accent:C.border}`,background:modo===m?C.accentBg:"#fff",color:modo===m?C.accent:C.muted,fontFamily:F.body,fontSize:12,fontWeight:600,cursor:"pointer",transition:"all 0.15s"}}>
-                  {m==="anual"?"A cada 12 meses":"Mensal completo"}
+                <button key={m} onClick={()=>setModo(m)} style={{padding:"5px 12px",borderRadius:6,border:`1px solid ${modo===m?C.accent:C.border}`,background:modo===m?C.accentBg:"transparent",color:modo===m?C.accent:C.muted,fontFamily:F.body,fontSize:11,fontWeight:600,transition:"all 0.15s"}}>
+                  {m==="anual"?"A cada 12 meses":"Mensal"}
                 </button>
               ))}
             </div>
           </div>
-
           {aba==="SAC"&&(
-            <div style={{overflowX:"auto",maxHeight:420,overflowY:"auto"}}>
-              <table cellPadding="0" style={{borderCollapse:"separate",borderSpacing:0,width:"100%",minWidth:520}}>
+            <div style={{overflowX:"auto",maxHeight:380,overflowY:"auto"}}>
+              <table cellPadding="0" style={{borderCollapse:"separate",borderSpacing:0,width:"100%",minWidth:500}}>
                 <thead style={{position:"sticky",top:0,zIndex:2}}>
                   <tr>
                     <th style={{...thS,textAlign:"center"}}>Mês</th>
@@ -568,7 +431,7 @@ function HistoricoTabela({sac,price,cons,cmSafe,carta,admin,fundo,prazoCons}) {
                 </thead>
                 <tbody>
                   {sacRows.map((r,i)=>(
-                    <tr key={r.month} style={{background:i%2===0?"#fff":"#fafcfa"}}>
+                    <tr key={r.month} style={{background:i%2===0?C.panel:C.panel2}}>
                       <td style={tdL}>{r.month}</td>
                       <td style={tdC()}>{brl(r.bal)}</td>
                       <td style={tdC(true,C.sac)}>{brl(r.amort)}</td>
@@ -581,10 +444,9 @@ function HistoricoTabela({sac,price,cons,cmSafe,carta,admin,fundo,prazoCons}) {
               </table>
             </div>
           )}
-
           {aba==="Price"&&(
-            <div style={{overflowX:"auto",maxHeight:420,overflowY:"auto"}}>
-              <table cellPadding="0" style={{borderCollapse:"separate",borderSpacing:0,width:"100%",minWidth:520}}>
+            <div style={{overflowX:"auto",maxHeight:380,overflowY:"auto"}}>
+              <table cellPadding="0" style={{borderCollapse:"separate",borderSpacing:0,width:"100%",minWidth:500}}>
                 <thead style={{position:"sticky",top:0,zIndex:2}}>
                   <tr>
                     <th style={{...thS,textAlign:"center"}}>Mês</th>
@@ -597,7 +459,7 @@ function HistoricoTabela({sac,price,cons,cmSafe,carta,admin,fundo,prazoCons}) {
                 </thead>
                 <tbody>
                   {priceRows.map((r,i)=>(
-                    <tr key={r.month} style={{background:i%2===0?"#fff":"#fafcfa"}}>
+                    <tr key={r.month} style={{background:i%2===0?C.panel:C.panel2}}>
                       <td style={tdL}>{r.month}</td>
                       <td style={tdC()}>{brl(r.bal)}</td>
                       <td style={tdC(true,C.price)}>{brl(r.amort)}</td>
@@ -610,10 +472,9 @@ function HistoricoTabela({sac,price,cons,cmSafe,carta,admin,fundo,prazoCons}) {
               </table>
             </div>
           )}
-
           {aba==="Consórcio"&&(
-            <div style={{overflowX:"auto",maxHeight:420,overflowY:"auto"}}>
-              <table cellPadding="0" style={{borderCollapse:"separate",borderSpacing:0,width:"100%",minWidth:600}}>
+            <div style={{overflowX:"auto",maxHeight:380,overflowY:"auto"}}>
+              <table cellPadding="0" style={{borderCollapse:"separate",borderSpacing:0,width:"100%",minWidth:580}}>
                 <thead style={{position:"sticky",top:0,zIndex:2}}>
                   <tr>
                     <th style={{...thS,textAlign:"center"}}>Mês</th>
@@ -632,7 +493,7 @@ function HistoricoTabela({sac,price,cons,cmSafe,carta,admin,fundo,prazoCons}) {
                     const taxaAdm=(carta*admin/100/prazoCons)*fatorM;
                     const fundoRes=(carta*fundo/100/prazoCons)*fatorM;
                     return (
-                      <tr key={r.month} style={{background:i%2===0?"#fff":"#fafcfa"}}>
+                      <tr key={r.month} style={{background:i%2===0?C.panel:C.panel2}}>
                         <td style={{...tdL,color:r.month>=cmSafe?C.accent:C.muted}}>{r.month}{r.month===cmSafe?" ★":""}</td>
                         <td style={tdC(true,C.cons)}>{brl(fundoComum)}</td>
                         <td style={tdC()}>{brl(taxaAdm)}</td>
@@ -652,164 +513,89 @@ function HistoricoTabela({sac,price,cons,cmSafe,carta,admin,fundo,prazoCons}) {
   );
 }
 
-
-// ─── FLUXO DE CAIXA COMPONENT ────────────────────────────────────────────────
-function FluxoCaixa({sac,price,cons,cmSafe,entrada,fgts,lance,aluguelPorMes,sacAmort,priceAmort,amortAtiva,amortMesAnual}) {
+// ─── FLUXO DE CAIXA ───────────────────────────────────────────────────────────
+function FluxoCaixa({sac,price,cons,cmSafe,entrada,fgts,lance,aluguelPorMes,sacAmort,priceAmort,amortAtiva}) {
   const [open,setOpen]=useState(false);
   const [modo,setModo]=useState("anual");
-
   const maxM=Math.max(sac.rows.length,price.rows.length,cons.rows.length);
-
-  // Meses a exibir
   const meses=useMemo(()=>{
     if(modo==="mensal") return Array.from({length:maxM},(_,i)=>i+1);
-    // Anual: mês 1 + múltiplos de 12 + último mês
     const s=new Set([1]);
     for(let m=12;m<=maxM;m+=12) s.add(m);
     s.add(maxM);
     return [...s].sort((a,b)=>a-b);
   },[modo,maxM]);
 
-  const thS={padding:"9px 12px",fontSize:11,fontWeight:700,textAlign:"right",
-    color:C.muted,borderBottom:`1px solid ${C.border}`,background:C.soft,
-    fontFamily:F.body,textTransform:"uppercase",letterSpacing:"0.07em",whiteSpace:"nowrap"};
-  const tdN=(v,bold,color,bg)=>({
-    padding:"8px 12px",fontSize:12,textAlign:"right",
-    borderBottom:`1px solid ${C.border}`,fontFamily:F.body,
-    fontWeight:bold?700:400,color:color||C.text,
-    whiteSpace:"nowrap",background:bg||"transparent"
-  });
-  const tdM={padding:"8px 12px",fontSize:12,textAlign:"center",
-    borderBottom:`1px solid ${C.border}`,fontFamily:F.body,
-    color:C.muted,whiteSpace:"nowrap",fontWeight:500};
+  const thS={padding:"8px 12px",fontSize:10,fontWeight:600,textAlign:"right",color:C.muted,borderBottom:`1px solid ${C.border}`,background:C.panel2,fontFamily:F.body,textTransform:"uppercase",letterSpacing:"0.07em",whiteSpace:"nowrap"};
+  const tdN=(bold,color,bg)=>({padding:"7px 12px",fontSize:12,textAlign:"right",borderBottom:`1px solid ${C.border}`,fontFamily:F.body,fontWeight:bold?700:400,color:color||C.text,whiteSpace:"nowrap",background:bg||"transparent"});
+  const tdM={padding:"7px 12px",fontSize:12,textAlign:"center",borderBottom:`1px solid ${C.border}`,fontFamily:F.body,color:C.muted,whiteSpace:"nowrap",fontWeight:500};
 
   return (
-    <div style={{background:C.panel,border:`1px solid ${C.border}`,borderRadius:16,
-      boxShadow:"0 2px 12px rgba(0,0,0,0.04)",marginBottom:16,overflow:"hidden"}}>
-
-      {/* Header */}
-      <button onClick={()=>setOpen(o=>!o)} style={{width:"100%",background:"none",
-        border:"none",cursor:"pointer",padding:"16px 22px",display:"flex",
-        alignItems:"center",justifyContent:"space-between",fontFamily:F.body}}>
-        <div style={{display:"flex",alignItems:"center",gap:12,flexWrap:"wrap"}}>
-          <span style={{fontFamily:F.display,fontSize:17,fontWeight:700,color:C.text}}>
-            Fluxo de caixa comparativo
-          </span>
-          <span style={{fontSize:12,color:C.muted}}>
-            Parcela mensal lado a lado — SAC · Price · Consórcio
-          </span>
+    <div style={{background:C.panel,border:`1px solid ${C.border}`,borderRadius:10,marginBottom:12,overflow:"hidden"}}>
+      <button onClick={()=>setOpen(o=>!o)} style={{width:"100%",background:"none",border:"none",padding:"14px 20px",display:"flex",alignItems:"center",justifyContent:"space-between",fontFamily:F.body}}>
+        <div style={{display:"flex",alignItems:"center",gap:10,flexWrap:"wrap"}}>
+          <span style={{fontSize:13,fontWeight:600,color:C.text}}>//</span>
+          <span style={{fontSize:13,fontWeight:600,color:C.text}}>Fluxo de caixa comparativo</span>
+          <span style={{fontSize:11,color:C.muted}}>SAC · Price · Consórcio</span>
         </div>
-        <span style={{fontSize:18,color:C.muted,transition:"transform 0.2s",
-          transform:open?"rotate(180deg)":"rotate(0deg)"}}>▾</span>
+        <span style={{fontSize:16,color:C.muted,transition:"transform 0.2s",transform:open?"rotate(180deg)":"rotate(0deg)"}}>▾</span>
       </button>
-
       {open&&(
         <div>
-          {/* Controles */}
-          <div style={{padding:"0 22px 14px",display:"flex",alignItems:"center",
-            justifyContent:"space-between",flexWrap:"wrap",gap:10,
-            borderBottom:`1px solid ${C.border}`}}>
-            <div style={{fontSize:12,color:C.muted,fontFamily:F.body}}>
-              Entradas destacadas em negrito · ★ = contemplação do consórcio
-            </div>
+          <div style={{padding:"0 20px 10px",display:"flex",alignItems:"center",justifyContent:"space-between",flexWrap:"wrap",gap:8,borderBottom:`1px solid ${C.border}`}}>
+            <div style={{fontSize:11,color:C.muted,fontFamily:F.body}}>★ = contemplação do consórcio</div>
             <div style={{display:"flex",gap:6}}>
               {["anual","mensal"].map(m=>(
-                <button key={m} onClick={()=>setModo(m)} style={{
-                  padding:"6px 14px",borderRadius:8,
-                  border:`1.5px solid ${modo===m?C.accent:C.border}`,
-                  background:modo===m?C.accentBg:"#fff",
-                  color:modo===m?C.accent:C.muted,
-                  fontFamily:F.body,fontSize:12,fontWeight:600,cursor:"pointer"}}>
-                  {m==="anual"?"A cada 12 meses":"Mensal completo"}
+                <button key={m} onClick={()=>setModo(m)} style={{padding:"5px 12px",borderRadius:6,border:`1px solid ${modo===m?C.accent:C.border}`,background:modo===m?C.accentBg:"transparent",color:modo===m?C.accent:C.muted,fontFamily:F.body,fontSize:11,fontWeight:600,transition:"all 0.15s"}}>
+                  {m==="anual"?"A cada 12 meses":"Mensal"}
                 </button>
               ))}
             </div>
           </div>
-
-          <div style={{overflowX:"auto",maxHeight:480,overflowY:"auto"}}>
-            <table cellPadding="0" style={{borderCollapse:"separate",borderSpacing:0,
-              width:"100%",minWidth:620}}>
+          <div style={{overflowX:"auto",maxHeight:440,overflowY:"auto"}}>
+            <table cellPadding="0" style={{borderCollapse:"separate",borderSpacing:0,width:"100%",minWidth:580}}>
               <thead style={{position:"sticky",top:0,zIndex:2}}>
                 <tr>
                   <th style={{...thS,textAlign:"center",width:60}}>Mês</th>
                   <th style={{...thS,color:C.sac}}>SAC</th>
                   <th style={{...thS,color:C.price}}>Price</th>
                   <th style={{...thS,color:C.cons}}>Consórcio</th>
-                  {amortAtiva&&<th style={{...thS,color:C.sac}}>Amort. Extra</th>}
-                  <th style={{...thS}}>Menor</th>
+                  <th style={thS}>Menor</th>
                 </tr>
               </thead>
               <tbody>
-                {/* Linha de entrada/lance — mês 0 */}
                 {(entrada>0||fgts>0||lance>0)&&(
                   <tr style={{background:C.accentBg}}>
                     <td style={{...tdM,color:C.accent,fontWeight:700}}>0</td>
-                    <td style={tdN(entrada+fgts,true,C.sac,C.accentBg)}>
-                      {entrada+fgts>0?<><strong>{brl(entrada+fgts)}</strong><br/><span style={{fontSize:10,color:C.muted}}>entrada{fgts>0?" + FGTS":""}</span></>:"—"}
-                    </td>
-                    <td style={tdN(entrada+fgts,true,C.price,C.accentBg)}>
-                      {entrada+fgts>0?<><strong>{brl(entrada+fgts)}</strong><br/><span style={{fontSize:10,color:C.muted}}>entrada{fgts>0?" + FGTS":""}</span></>:"—"}
-                    </td>
-                    <td style={tdN(lance,true,C.cons,C.accentBg)}>
-                      {lance>0?<><strong>{brl(lance)}</strong><br/><span style={{fontSize:10,color:C.muted}}>lance próprio</span></>:<span style={{color:C.muted}}>—</span>}
-                    </td>
-                    <td style={tdN(null,false,C.muted,C.accentBg)}>
-                      <span style={{fontSize:10,color:C.muted}}>desembolso inicial</span>
-                    </td>
+                    <td style={tdN(true,C.sac)}>{entrada+fgts>0?brl(entrada+fgts):"—"}</td>
+                    <td style={tdN(true,C.price)}>{entrada+fgts>0?brl(entrada+fgts):"—"}</td>
+                    <td style={tdN(true,C.cons)}>{lance>0?brl(lance):<span style={{color:C.muted}}>—</span>}</td>
+                    <td style={tdN(false,C.muted)}><span style={{fontSize:10}}>desembolso inicial</span></td>
                   </tr>
                 )}
-
                 {meses.map((m,i)=>{
-                  const sr=sac.rows[m-1];
-                  const pr=price.rows[m-1];
-                  const cr=cons.rows[m-1];
-                  const sv=sr?.installment??null;
-                  const pv=pr?.installment??null;
-                  // Consórcio: adiciona aluguel se pré-contemplação
+                  const sr=sac.rows[m-1]; const pr=price.rows[m-1]; const cr=cons.rows[m-1];
+                  const sv=sr?.installment??null; const pv=pr?.installment??null;
                   const alug=m<=cmSafe?(aluguelPorMes[m-1]||0):0;
                   const cv=cr?(cr.installment+alug):null;
                   const nums=[sv,pv,cv].filter(v=>v!==null);
                   const minV=nums.length?Math.min(...nums):null;
-                  const isContemplacao=m===cmSafe;
-                  const rowBg=isContemplacao?C.accentBg:i%2===0?"#fff":"#fafcfa";
-
+                  const isCont=m===cmSafe;
+                  const rowBg=isCont?C.accentBg:i%2===0?C.panel:C.panel2;
                   return (
                     <tr key={m} style={{background:rowBg}}>
-                      <td style={{...tdM,color:isContemplacao?C.accent:C.muted,fontWeight:isContemplacao?700:500}}>
-                        {m}{isContemplacao?" ★":""}
-                      </td>
-                      {[{v:sv,color:C.sac},{v:pv,color:C.price},{v:cv,color:C.cons,alug}].map((item,j)=>{
+                      <td style={{...tdM,color:isCont?C.accent:C.muted,fontWeight:isCont?700:500}}>{m}{isCont?" ★":""}</td>
+                      {[{v:sv,color:C.sac},{v:pv,color:C.price},{v:cv,color:C.cons}].map((item,j)=>{
                         const isMin=item.v!==null&&item.v===minV;
                         return (
-                          <td key={j} style={tdN(item.v,isMin,isMin?item.color:C.text,isMin?C.accentHl:rowBg)}>
-                            {item.v===null
-                              ?<span style={{color:C.border}}>—</span>
-                              :<>
-                                {brl(item.v)}
-                                {item.alug>0&&<><br/><span style={{fontSize:10,color:C.muted}}>+{brl(item.alug)} aluguel</span></>}
-                              </>
-                            }
+                          <td key={j} style={tdN(isMin,isMin?item.color:C.text,isMin?C.accentHl:rowBg)}>
+                            {item.v===null?<span style={{color:C.borderMid}}>—</span>:brl(item.v)}
                           </td>
                         );
                       })}
-                      <td style={{...tdN(null,false),textAlign:"center"}}>
-                        {minV!==null&&(
-                          <span style={{fontSize:11,fontWeight:700,
-                            color:sv===minV?C.sac:pv===minV?C.price:C.cons}}>
-                            {sv===minV?"SAC":pv===minV?"Price":"Consórcio"}
-                          </span>
-                        )}
+                      <td style={{...tdN(false),textAlign:"center"}}>
+                        {minV!==null&&(<span style={{fontSize:11,fontWeight:700,color:sv===minV?C.sac:pv===minV?C.price:C.cons}}>{sv===minV?"SAC":pv===minV?"Price":"Consórcio"}</span>)}
                       </td>
-                      {amortAtiva&&(()=>{
-                        const sacEx=sacAmort?.rows[m-1]?.amortExtra||0;
-                        const priceEx=priceAmort?.rows[m-1]?.amortExtra||0;
-                        const extra=Math.max(sacEx,priceEx);
-                        return (
-                          <td style={tdN(extra,extra>0,extra>0?C.sac:C.muted,extra>0?"#eff6ff":rowBg)}>
-                            {extra>0?<><strong>{brl(extra)}</strong><br/><span style={{fontSize:10,color:C.muted}}>amort. extra</span></>:<span style={{color:C.border}}>—</span>}
-                          </td>
-                        );
-                      })()}
                     </tr>
                   );
                 })}
@@ -822,61 +608,45 @@ function FluxoCaixa({sac,price,cons,cmSafe,entrada,fgts,lance,aluguelPorMes,sacA
   );
 }
 
-// ─── CUSTOS DETALHADOS COMPONENT ─────────────────────────────────────────────
+// ─── CUSTOS DETALHADOS ────────────────────────────────────────────────────────
 function CustosDetalhados({st,pt,ct,sacTotal,priceTotal,consTotal,principal,entrada,fgts,aluguelTotal,cmSafe}) {
   const [open,setOpen]=useState(false);
-
-  const thS={padding:"10px 18px",fontSize:11,fontWeight:700,textAlign:"center",
-    color:C.muted,borderBottom:`1px solid ${C.border}`,background:C.soft,
-    fontFamily:F.body,textTransform:"uppercase",letterSpacing:"0.07em"};
-
+  const thS={padding:"9px 16px",fontSize:10,fontWeight:600,textAlign:"center",color:C.muted,borderBottom:`1px solid ${C.border}`,background:C.panel2,fontFamily:F.body,textTransform:"uppercase",letterSpacing:"0.07em"};
   const renderVal=(v,color,hlMin,minV)=>{
-    if(v===null||v===undefined) return <span style={{color:C.border,fontSize:16}}>—</span>;
-    if(typeof v==="string") return <span style={{color:C.text,fontSize:13}}>{v}</span>;
+    if(v===null||v===undefined) return <span style={{color:C.borderMid,fontSize:14}}>—</span>;
+    if(typeof v==="string") return <span style={{color:C.text,fontSize:12}}>{v}</span>;
     const isMin=hlMin&&v===minV;
-    return <span style={{fontWeight:isMin?700:400,color:isMin?color:C.text,fontSize:13}}>{brl(v)}</span>;
+    return <span style={{fontWeight:isMin?700:400,color:isMin?color:C.text,fontSize:12}}>{brl(v)}</span>;
   };
-
   const rows=[
     {label:"Juros + seguros + taxas (CET)",sub:"Custo Efetivo Total contratado",sac:st.totalInterest,price:pt.totalInterest,cons:null,hlMin:true},
     {label:"TR paga",sac:st.totalTR,price:pt.totalTR,cons:null,hlMin:true},
     {label:"Taxa de administração",sac:null,price:null,cons:ct.totalAdm,hlMin:false},
     {label:"Fundo de reserva",sub:"Pode ser devolvido ao final",sac:null,price:null,cons:ct.totalFundo,hlMin:false},
-    {label:"Indexador pré-contemplação",sub:"Carta e parcela crescem juntas",sac:null,price:null,cons:ct.totalIdxPre,hlMin:false},
-    {label:"Indexador pós-contemplação",sub:"Carta travada, parcela ainda cresce",sac:null,price:null,cons:ct.totalIdxPos,hlMin:false},
-    {label:"Aluguel durante espera",sub:aluguelTotal>0?`${cmSafe} meses · reajustado pelo indexador`:"Não informado",sac:null,price:null,cons:aluguelTotal>0?aluguelTotal:null,hlMin:false},
+    {label:"Indexador pré-contemplação",sac:null,price:null,cons:ct.totalIdxPre,hlMin:false},
+    {label:"Indexador pós-contemplação",sac:null,price:null,cons:ct.totalIdxPos,hlMin:false},
+    {label:"Aluguel durante espera",sub:aluguelTotal>0?`${cmSafe} meses`:"Não informado",sac:null,price:null,cons:aluguelTotal>0?aluguelTotal:null,hlMin:false},
     {label:"Entrada / lance",sac:entrada,price:entrada,cons:ct.lanceEfetivo||0,hlMin:true},
     {label:"FGTS utilizado",sac:fgts>0?fgts:null,price:fgts>0?fgts:null,cons:null,hlMin:false},
-    {label:"Valor financiado / carta de crédito",sub:"SAC e Price: imediato · Consórcio: carta na contemplação",sac:principal,price:principal,cons:ct.cartaTravada,hlMin:false},
-    {label:"Acesso ao imóvel",sac:"Mês 1",price:"Mês 1",cons:`Mês ${cmSafe} (estimativa)`,hlMin:false},
+    {label:"Valor financiado / carta",sac:principal,price:principal,cons:ct.cartaTravada,hlMin:false},
+    {label:"Acesso ao imóvel",sac:"Mês 1",price:"Mês 1",cons:`Mês ${cmSafe}`,hlMin:false},
   ];
-
   return (
-    <div style={{background:C.panel,border:`1px solid ${C.border}`,borderRadius:16,
-      boxShadow:"0 2px 12px rgba(0,0,0,0.04)",marginBottom:20,overflow:"hidden"}}>
-
-      {/* Header clicável */}
-      <button onClick={()=>setOpen(o=>!o)} style={{width:"100%",background:"none",border:"none",
-        cursor:"pointer",padding:"16px 22px",display:"flex",alignItems:"center",
-        justifyContent:"space-between",fontFamily:F.body}}>
-        <div style={{display:"flex",alignItems:"center",gap:12,flexWrap:"wrap"}}>
-          <span style={{fontFamily:F.display,fontSize:17,fontWeight:700,color:C.text}}>
-            Detalhamento de custos
-          </span>
-          <span style={{fontSize:12,color:C.muted}}>
-            Juros · TR · Taxas · Indexador · Aluguel · Total desembolsado
-          </span>
+    <div style={{background:C.panel,border:`1px solid ${C.border}`,borderRadius:10,marginBottom:12,overflow:"hidden"}}>
+      <button onClick={()=>setOpen(o=>!o)} style={{width:"100%",background:"none",border:"none",padding:"14px 20px",display:"flex",alignItems:"center",justifyContent:"space-between",fontFamily:F.body}}>
+        <div style={{display:"flex",alignItems:"center",gap:10,flexWrap:"wrap"}}>
+          <span style={{fontSize:13,fontWeight:600,color:C.text}}>//</span>
+          <span style={{fontSize:13,fontWeight:600,color:C.text}}>Detalhamento de custos</span>
+          <span style={{fontSize:11,color:C.muted}}>Juros · TR · Taxas · Indexador · Total</span>
         </div>
-        <span style={{fontSize:18,color:C.muted,transition:"transform 0.2s",
-          transform:open?"rotate(180deg)":"rotate(0deg)"}}>▾</span>
+        <span style={{fontSize:16,color:C.muted,transition:"transform 0.2s",transform:open?"rotate(180deg)":"rotate(0deg)"}}>▾</span>
       </button>
-
       {open&&(
         <div style={{overflowX:"auto"}}>
-          <table cellPadding="0" style={{borderCollapse:"separate",borderSpacing:0,width:"100%",minWidth:560}}>
+          <table cellPadding="0" style={{borderCollapse:"separate",borderSpacing:0,width:"100%",minWidth:520}}>
             <thead>
               <tr>
-                <th style={{...thS,textAlign:"left",width:"38%",padding:"10px 18px"}}>Indicador</th>
+                <th style={{...thS,textAlign:"left",padding:"9px 16px"}}>Indicador</th>
                 <th style={{...thS,color:C.sac}}>SAC</th>
                 <th style={{...thS,color:C.price}}>Price</th>
                 <th style={{...thS,color:C.cons}}>Consórcio</th>
@@ -887,18 +657,15 @@ function CustosDetalhados({st,pt,ct,sacTotal,priceTotal,consTotal,principal,entr
                 const nums=[row.sac,row.price,row.cons].filter(v=>typeof v==="number");
                 const minV=row.hlMin&&nums.length?Math.min(...nums):null;
                 return (
-                  <tr key={ri} style={{background:ri%2===0?"#fff":"#fafcfa"}}>
-                    <td style={{padding:"11px 18px",fontSize:13,color:C.text,
-                      borderBottom:`1px solid ${C.border}`,fontFamily:F.body}}>
+                  <tr key={ri} style={{background:ri%2===0?C.panel:C.panel2}}>
+                    <td style={{padding:"10px 16px",fontSize:12,color:C.text,borderBottom:`1px solid ${C.border}`,fontFamily:F.body}}>
                       <div style={{fontWeight:500}}>{row.label}</div>
-                      {row.sub&&<div style={{fontSize:11,color:C.muted,marginTop:2}}>{row.sub}</div>}
+                      {row.sub&&<div style={{fontSize:10,color:C.muted,marginTop:2}}>{row.sub}</div>}
                     </td>
                     {[{v:row.sac,color:C.sac},{v:row.price,color:C.price},{v:row.cons,color:C.cons}].map((item,j)=>{
                       const isMin=row.hlMin&&typeof item.v==="number"&&item.v===minV;
                       return (
-                        <td key={j} style={{padding:"11px 18px",fontSize:13,textAlign:"center",
-                          borderBottom:`1px solid ${C.border}`,fontFamily:F.body,
-                          background:isMin?C.accentHl:"transparent",whiteSpace:"nowrap"}}>
+                        <td key={j} style={{padding:"10px 16px",fontSize:12,textAlign:"center",borderBottom:`1px solid ${C.border}`,fontFamily:F.body,background:isMin?C.accentHl:"transparent",whiteSpace:"nowrap"}}>
                           {renderVal(item.v,item.color,row.hlMin,minV)}
                         </td>
                       );
@@ -906,26 +673,18 @@ function CustosDetalhados({st,pt,ct,sacTotal,priceTotal,consTotal,principal,entr
                   </tr>
                 );
               })}
-
-              {/* Linha total destacada */}
               {(()=>{
                 const vals=[sacTotal,priceTotal,consTotal];
                 const minV=Math.min(...vals);
                 const colors=[C.sac,C.price,C.cons];
                 return (
                   <tr style={{background:C.accentBg}}>
-                    <td style={{padding:"14px 18px",fontSize:14,fontWeight:700,color:C.text,
-                      borderTop:`2px solid ${C.borderMid}`,fontFamily:F.body}}>
+                    <td style={{padding:"12px 16px",fontSize:13,fontWeight:700,color:C.text,borderTop:`1px solid ${C.borderMid}`,fontFamily:F.body}}>
                       Total desembolsado
-                      <div style={{fontSize:11,color:C.muted,fontWeight:400,marginTop:1}}>
-                        Parcelas + entrada / lance + aluguel
-                      </div>
+                      <div style={{fontSize:10,color:C.muted,fontWeight:400,marginTop:1}}>Parcelas + entrada / lance + aluguel</div>
                     </td>
                     {vals.map((v,i)=>(
-                      <td key={i} style={{padding:"14px 18px",fontSize:14,textAlign:"center",
-                        fontWeight:v===minV?700:500,color:v===minV?colors[i]:C.text,
-                        background:v===minV?C.accentHl:C.accentBg,
-                        borderTop:`2px solid ${C.borderMid}`,whiteSpace:"nowrap",fontFamily:F.body}}>
+                      <td key={i} style={{padding:"12px 16px",fontSize:13,textAlign:"center",fontWeight:v===minV?700:500,color:v===minV?colors[i]:C.text,background:v===minV?C.accentHl:C.accentBg,borderTop:`1px solid ${C.borderMid}`,whiteSpace:"nowrap",fontFamily:F.body}}>
                         {brl(v)}
                       </td>
                     ))}
@@ -940,76 +699,50 @@ function CustosDetalhados({st,pt,ct,sacTotal,priceTotal,consTotal,principal,entr
   );
 }
 
-// ─── CENÁRIOS CONTEMPLAÇÃO COMPONENT ────────────────────────────────────────
+// ─── CENÁRIOS CONTEMPLAÇÃO ────────────────────────────────────────────────────
 function CenariosContemplacao({cenarios,cmSafe}) {
   const [open,setOpen]=useState(false);
-
   return (
-    <div style={{background:C.panel,border:`1px solid ${C.border}`,borderRadius:16,
-      boxShadow:"0 2px 12px rgba(0,0,0,0.04)",marginBottom:20,overflow:"hidden"}}>
-
-      <button onClick={()=>setOpen(o=>!o)} style={{width:"100%",background:"none",
-        border:"none",cursor:"pointer",padding:"16px 22px",display:"flex",
-        alignItems:"center",justifyContent:"space-between",fontFamily:F.body}}>
-        <div style={{display:"flex",alignItems:"center",gap:12,flexWrap:"wrap"}}>
-          <span style={{fontFamily:F.display,fontSize:17,fontWeight:700,color:C.text}}>
-            Cenários de contemplação — Consórcio
-          </span>
-          <span style={{fontSize:12,color:C.muted}}>
-            Como os indicadores mudam dependendo de quando você for sorteado
-          </span>
+    <div style={{background:C.panel,border:`1px solid ${C.border}`,borderRadius:10,marginBottom:12,overflow:"hidden"}}>
+      <button onClick={()=>setOpen(o=>!o)} style={{width:"100%",background:"none",border:"none",padding:"14px 20px",display:"flex",alignItems:"center",justifyContent:"space-between",fontFamily:F.body}}>
+        <div style={{display:"flex",alignItems:"center",gap:10,flexWrap:"wrap"}}>
+          <span style={{fontSize:13,fontWeight:600,color:C.text}}>//</span>
+          <span style={{fontSize:13,fontWeight:600,color:C.text}}>Cenários de contemplação</span>
+          <span style={{fontSize:11,color:C.muted}}>Como os indicadores mudam pelo mês sorteado</span>
         </div>
-        <span style={{fontSize:18,color:C.muted,transition:"transform 0.2s",
-          transform:open?"rotate(180deg)":"rotate(0deg)"}}>▾</span>
+        <span style={{fontSize:16,color:C.muted,transition:"transform 0.2s",transform:open?"rotate(180deg)":"rotate(0deg)"}}>▾</span>
       </button>
-
       {open&&(
-        <div>
-          <div style={{padding:"6px 20px 10px",borderBottom:`1px solid ${C.border}`}}>
-            <div style={{fontSize:12,color:C.muted,fontFamily:F.body}}>
-              Coluna destacada = mês selecionado nos inputs
-            </div>
-          </div>
-          <div style={{overflowX:"auto"}}>
-            <table cellPadding="0" style={{borderCollapse:"separate",borderSpacing:0,width:"100%",minWidth:400}}>
-              <thead>
-                <tr>
-                  <th style={{padding:"11px 16px",fontSize:11,fontWeight:700,textAlign:"left",color:C.muted,borderBottom:`1px solid ${C.border}`,background:C.soft,fontFamily:F.body,textTransform:"uppercase",letterSpacing:"0.07em"}}>Indicador</th>
+        <div style={{overflowX:"auto"}}>
+          <table cellPadding="0" style={{borderCollapse:"separate",borderSpacing:0,width:"100%",minWidth:380}}>
+            <thead>
+              <tr>
+                <th style={{padding:"10px 16px",fontSize:10,fontWeight:600,textAlign:"left",color:C.muted,borderBottom:`1px solid ${C.border}`,background:C.panel2,fontFamily:F.body,textTransform:"uppercase",letterSpacing:"0.07em"}}>Indicador</th>
+                {cenarios.map(c=>(
+                  <th key={c.cm} style={{padding:"10px 16px",fontSize:10,fontWeight:600,textAlign:"center",borderBottom:`1px solid ${C.border}`,background:c.cm===cmSafe?C.accentBg:C.panel2,fontFamily:F.body,textTransform:"uppercase",letterSpacing:"0.07em",color:c.cm===cmSafe?C.accent:C.muted}}>
+                    Mês {c.cm}{c.cm===cmSafe?" ✓":""}
+                  </th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {[
+                {label:"Carta reajustada",fn:c=>brl(c.cartaTravada)},
+                {label:"Desembolso pré-contemplação",fn:c=>brl(c.desembolsoPre)},
+                {label:"Desembolso pós-contemplação",fn:c=>brl(c.desembolsoPos)},
+                {label:"Total desembolsado",fn:c=>brl(c.totalPaid),bold:true},
+              ].map((row,ri)=>(
+                <tr key={ri} style={{background:ri%2===0?C.panel:C.panel2}}>
+                  <td style={{padding:"10px 16px",fontSize:12,color:C.text,borderBottom:`1px solid ${C.border}`,fontFamily:F.body,fontWeight:row.bold?700:500}}>{row.label}</td>
                   {cenarios.map(c=>(
-                    <th key={c.cm} style={{padding:"11px 16px",fontSize:11,fontWeight:700,textAlign:"center",borderBottom:`1px solid ${C.border}`,background:c.cm===cmSafe?C.accentBg:C.soft,fontFamily:F.body,textTransform:"uppercase",letterSpacing:"0.07em",color:c.cm===cmSafe?C.accent:C.muted}}>
-                      Mês {c.cm}{c.cm===cmSafe?" ✓":""}
-                    </th>
+                    <td key={c.cm} style={{padding:"10px 16px",fontSize:12,textAlign:"center",borderBottom:`1px solid ${C.border}`,fontFamily:F.body,background:c.cm===cmSafe?C.accentBg:"transparent",fontWeight:row.bold||c.cm===cmSafe?700:400,color:C.text,whiteSpace:"nowrap"}}>
+                      {row.fn(c)}
+                    </td>
                   ))}
                 </tr>
-              </thead>
-              <tbody>
-                {[
-                  {label:"Carta reajustada",sub:"Valor do crédito recebido na contemplação",fn:c=>brl(c.cartaTravada)},
-                  {label:"Desembolso até a contemplação",sub:"Parcelas reajustadas · inclui carta + adm + fundo de reserva",fn:c=>brl(c.desembolsoPre)},
-                  {label:"Desembolso pós-contemplação",sub:"Parcelas reajustadas sobre o saldo devedor remanescente",fn:c=>brl(c.desembolsoPos)},
-                  {label:"Total desembolsado",sub:"Soma dos dois períodos + lance",fn:c=>brl(c.totalPaid),bold:true},
-                ].map((row,ri)=>(
-                  <tr key={ri} style={{background:ri%2===0?"#fff":"#fafcfa"}}>
-                    <td style={{padding:"11px 16px",fontSize:13,color:C.text,borderBottom:`1px solid ${C.border}`,fontFamily:F.body}}>
-                      <div style={{fontWeight:row.bold?700:500}}>{row.label}</div>
-                      {row.sub&&<div style={{fontSize:11,color:C.muted,marginTop:1}}>{row.sub}</div>}
-                    </td>
-                    {cenarios.map(c=>(
-                      <td key={c.cm} style={{
-                        padding:"11px 16px",fontSize:13,textAlign:"center",
-                        borderBottom:`1px solid ${C.border}`,fontFamily:F.body,
-                        background:c.cm===cmSafe?C.accentBg:"transparent",
-                        fontWeight:row.bold||c.cm===cmSafe?700:400,
-                        color:C.text,whiteSpace:"nowrap",
-                      }}>
-                        {row.fn(c)}
-                      </td>
-                    ))}
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
+              ))}
+            </tbody>
+          </table>
         </div>
       )}
     </div>
@@ -1034,15 +767,13 @@ export default function App() {
   const [aluguel,setAluguel]=useState(0);
   const [promoDesc,setPromoDesc]=useState(0);
   const [promoMeses,setPromoMeses]=useState(0);
-
-  // Amortizações extraordinárias
   const [amortAtiva,setAmortAtiva]=useState(false);
   const [amortMensal,setAmortMensal]=useState(0);
   const [amortAnual,setAmortAnual]=useState(0);
   const [amortMesAnual,setAmortMesAnual]=useState(12);
   const [amortEfeito,setAmortEfeito]=useState("prazo");
-  const [amortPeriodicidade,setAmortPeriodicidade]=useState("todo_ano"); // "todo_ano" | "uma_vez"
-  const [amortAno,setAmortAno]=useState(5); // ano do aporte único (1=primeiro ano)
+  const [amortPeriodicidade,setAmortPeriodicidade]=useState("todo_ano");
+  const [amortAno,setAmortAno]=useState(5);
 
   const rM=useMemo(()=>annualToMonthly(juros),[juros]);
   const trM=useMemo(()=>annualToMonthly(trAnual),[trAnual]);
@@ -1053,7 +784,6 @@ export default function App() {
   const sac=useMemo(()=>calcSac(principal,rM,trM,prazoFin),[principal,rM,trM,prazoFin]);
   const price=useMemo(()=>calcPrice(principal,rM,trM,prazoFin),[principal,rM,trM,prazoFin]);
   const cons=useMemo(()=>calcConsorcio(carta,prazoCons,admin/100,fundo/100,idxM,cmSafe,lance,promoDesc/100,promoMeses),[carta,prazoCons,admin,fundo,idxM,cmSafe,lance,promoDesc,promoMeses]);
-
   const sacAmort=useMemo(()=>amortAtiva?calcSacAmort(principal,rM,trM,prazoFin,amortMensal,amortAnual,amortMesAnual,amortEfeito,amortPeriodicidade,amortAno):null,[principal,rM,trM,prazoFin,amortMensal,amortAnual,amortMesAnual,amortEfeito,amortAtiva,amortPeriodicidade,amortAno]);
   const priceAmort=useMemo(()=>amortAtiva?calcPriceAmort(principal,rM,trM,prazoFin,amortMensal,amortAnual,amortMesAnual,amortEfeito,amortPeriodicidade,amortAno):null,[principal,rM,trM,prazoFin,amortMensal,amortAnual,amortMesAnual,amortEfeito,amortAtiva,amortPeriodicidade,amortAno]);
 
@@ -1069,13 +799,38 @@ export default function App() {
   const consTotal=(ct.totalPaid||0)+aluguelTotal;
   const maxM=Math.min(Math.max(sac.rows.length,price.rows.length,cons.rows.length),360);
 
-  const chartParcelas=useMemo(()=>Array.from({length:maxM},(_,i)=>({month:i+1,SAC:sac.rows[i]?.installment??null,Price:price.rows[i]?.installment??null,Consórcio:cons.rows[i]?.installment??null})),[sac.rows,price.rows,cons.rows,maxM]);
+  const [visibleLines,setVisibleLines]=useState({SAC:true,Price:true,"Consórcio":true,"SAC+":true,"Price+":true});
+  const toggleLine=(name)=>setVisibleLines(v=>({...v,[name]:!v[name]}));
+
+  const CustomLegend=({payload})=>(
+    <div style={{display:"flex",justifyContent:"center",gap:16,marginTop:8,flexWrap:"wrap"}}>
+      {payload.map((p,i)=>{
+        const active=visibleLines[p.value];
+        const isDashed=p.value==="SAC+"||p.value==="Price+";
+        return (
+          <div key={i} onClick={()=>toggleLine(p.value)} style={{display:"flex",alignItems:"center",gap:6,cursor:"pointer",opacity:active?1:0.3,transition:"opacity 0.2s",userSelect:"none"}}>
+            <svg width="20" height="3"><line x1="0" y1="1.5" x2="20" y2="1.5" stroke={p.color} strokeWidth="2" strokeDasharray={isDashed?"5 3":"none"} strokeLinecap="round"/></svg>
+            <span style={{fontSize:11,fontFamily:F.body,color:active?C.text:C.muted,fontWeight:active?500:400}}>{p.value}{isDashed?" (c/ amort.)":""}</span>
+          </div>
+        );
+      })}
+    </div>
+  );
+
+  const chartParcelasEx=useMemo(()=>Array.from({length:maxM},(_,i)=>({
+    month:i+1,
+    SAC:sac.rows[i]?.installment>0?sac.rows[i].installment:null,
+    Price:price.rows[i]?.installment>0?price.rows[i].installment:null,
+    "Consórcio":cons.rows[i]?.installment>0?cons.rows[i].installment:null,
+    "SAC+":sacAmort?.rows[i]?.installment>0?sacAmort.rows[i].installment:null,
+    "Price+":priceAmort?.rows[i]?.installment>0?priceAmort.rows[i].installment:null,
+  })),[sac.rows,price.rows,cons.rows,sacAmort,priceAmort,maxM]);
 
   const chartDesembolso=useMemo(()=>{
     let ac=0;
     return Array.from({length:maxM},(_,i)=>{
       if(i<aluguelPorMes.length) ac+=aluguelPorMes[i];
-      return {month:i+1,SAC:sac.rows[i]?sac.rows[i].cumInstall+entrada+fgts:null,Price:price.rows[i]?price.rows[i].cumInstall+entrada+fgts:null,Consórcio:cons.rows[i]?cons.rows[i].cumInstall+ac:null};
+      return {month:i+1,SAC:sac.rows[i]?sac.rows[i].cumInstall+entrada+fgts:null,Price:price.rows[i]?price.rows[i].cumInstall+entrada+fgts:null,"Consórcio":cons.rows[i]?cons.rows[i].cumInstall+ac:null};
     });
   },[sac.rows,price.rows,cons.rows,maxM,entrada,fgts,aluguelPorMes]);
 
@@ -1084,62 +839,10 @@ export default function App() {
     const sacP=sac.rows[i]?Math.max(iR-sac.rows[i].bal,0):null;
     const priceP=price.rows[i]?Math.max(iR-price.rows[i].bal,0):null;
     let consP=null;
-    if(cons.rows[i]){ if(m<cmSafe){consP=0;}else{const iC=cons.meta.cartaTravada*(1+idxM)**(m-cmSafe);consP=Math.max(iC-(cons.rows[i].balance||0),0);} }
-    return {month:m,SAC:sacP,Price:priceP,Consórcio:consP};
+    if(cons.rows[i]){ if(m<cmSafe){consP=0;}else{const iC=cons.meta.cartaTravada*(1+idxM)**(m-cmSafe);consP=Math.max(iC,0);} }
+    return {month:m,SAC:sacP,Price:priceP,"Consórcio":consP};
   }),[sac.rows,price.rows,cons.rows,maxM,imovel,idxM,cmSafe,cons.meta]);
 
-  const thCol=(color)=>({padding:"13px 18px",fontSize:11,fontWeight:700,textAlign:"center",color,borderBottom:`1px solid ${C.border}`,background:C.soft,fontFamily:F.body,textTransform:"uppercase",letterSpacing:"0.07em"});
-
-  // Cenários de contemplação
-  const cenariosMeses = [40, 80, 120, 160].filter(m => m <= prazoCons);
-  const cenarios = useMemo(() => cenariosMeses.map(cm => {
-    const c = calcConsorcio(carta, prazoCons, admin/100, fundo/100, idxM, cm, lance, promoDesc/100, promoMeses);
-    const ct2 = c.totals;
-    const desembolsoPreCm = c.rows.slice(0, cm).reduce((a, r) => a + r.installment, 0)
-      + (ct2.lanceEfetivo || 0);
-    return {
-      cm,
-      cartaTravada: ct2.cartaTravada,
-      idxPre: ct2.totalIdxPre,
-      idxPos: ct2.totalIdxPos,
-      desembolsoPre: desembolsoPreCm,
-      desembolsoPos: Math.max((ct2.totalPaid || 0) - desembolsoPreCm + (ct2.lanceEfetivo||0), 0),
-      totalPaid: ct2.totalPaid,
-    };
-  }), [carta, prazoCons, admin, fundo, idxM, lance, promoDesc, promoMeses, cenariosMeses.join()]);
-
-  const totaisList=[{label:"SAC",value:sacTotal,color:C.sac},{label:"Price",value:priceTotal,color:C.price},{label:"Consórcio",value:consTotal,color:C.cons}];
-  const minT=Math.min(...totaisList.map(t=>t.value));
-
-  // Toggle de visibilidade das linhas nos gráficos
-  const [visibleLines,setVisibleLines]=useState({SAC:true,Price:true,"Consórcio":true,"SAC+":true,"Price+":true});
-  const toggleLine=(name)=>setVisibleLines(v=>({...v,[name]:!v[name]}));
-
-  // Legenda customizada clicável
-  const CustomLegend=({payload})=>(
-    <div style={{display:"flex",justifyContent:"center",gap:20,marginTop:8,flexWrap:"wrap"}}>
-      {payload.map((p,i)=>{
-        const active=visibleLines[p.value];
-        const isDashed=p.value==="SAC+"||p.value==="Price+";
-        return (
-          <div key={i} onClick={()=>toggleLine(p.value)}
-            style={{display:"flex",alignItems:"center",gap:6,cursor:"pointer",
-              opacity:active?1:0.35,transition:"opacity 0.2s",userSelect:"none"}}>
-            <svg width="24" height="4" style={{flexShrink:0}}>
-              <line x1="0" y1="2" x2="24" y2="2" stroke={p.color} strokeWidth="2.5"
-                strokeDasharray={isDashed?"6 3":"none"} strokeLinecap="round"/>
-            </svg>
-            <span style={{fontSize:12,fontFamily:F.body,color:active?C.text:C.muted,
-              fontWeight:active?500:400,textDecoration:active?"none":"line-through"}}>
-              {p.value}{isDashed?" (c/ amort.)":""}
-            </span>
-          </div>
-        );
-      })}
-    </div>
-  );
-
-  // Chart saldo devedor
   const chartSaldo=useMemo(()=>Array.from({length:maxM},(_,i)=>({
     month:i+1,
     SAC:sac.rows[i]?.bal||null,
@@ -1148,109 +851,73 @@ export default function App() {
     "Price+":priceAmort?.rows[i]!=null?priceAmort.rows[i].bal:null,
   })),[sac.rows,price.rows,sacAmort,priceAmort,maxM]);
 
-  // Chart parcelas com amort
-  // Para o gráfico: no modo parcela, installment=0 é válido (contrato existe, parcela zerou)
-  // No modo prazo, após o contrato encerrar não há dados
-  const sacAmortInst=(i)=>{
-    if(!sacAmort?.rows[i]) return null;
-    if(amortEfeito==="parcela") return sacAmort.rows[i].installment; // mostra 0 como válido
-    return sacAmort.rows[i].installment>0?sacAmort.rows[i].installment:null;
-  };
-  const priceAmortInst=(i)=>{
-    if(!priceAmort?.rows[i]) return null;
-    if(amortEfeito==="parcela") return priceAmort.rows[i].installment;
-    return priceAmort.rows[i].installment>0?priceAmort.rows[i].installment:null;
-  };
+  const cenariosMeses=[40,80,120,160].filter(m=>m<=prazoCons);
+  const cenarios=useMemo(()=>cenariosMeses.map(cm=>{
+    const c=calcConsorcio(carta,prazoCons,admin/100,fundo/100,idxM,cm,lance,promoDesc/100,promoMeses);
+    const ct2=c.totals;
+    const desembolsoPreCm=c.rows.slice(0,cm).reduce((a,r)=>a+r.installment,0)+(ct2.lanceEfetivo||0);
+    return {cm,cartaTravada:ct2.cartaTravada,desembolsoPre:desembolsoPreCm,desembolsoPos:Math.max((ct2.totalPaid||0)-desembolsoPreCm+(ct2.lanceEfetivo||0),0),totalPaid:ct2.totalPaid};
+  }),[carta,prazoCons,admin,fundo,idxM,lance,promoDesc,promoMeses]);
 
-  const chartParcelasEx=useMemo(()=>Array.from({length:maxM},(_,i)=>({
-    month:i+1,
-    SAC:sac.rows[i]?.installment>0?sac.rows[i].installment:null,
-    Price:price.rows[i]?.installment>0?price.rows[i].installment:null,
-    "Consórcio":cons.rows[i]?.installment>0?cons.rows[i].installment:null,
-    "SAC+":sacAmortInst(i),
-    "Price+":priceAmortInst(i),
-  })),[sac.rows,price.rows,cons.rows,sacAmort,priceAmort,maxM,amortEfeito]);
-
-  const chartDesembolsoEx=useMemo(()=>{
-    let ac=0;
-    return Array.from({length:maxM},(_,i)=>{
-      if(i<aluguelPorMes.length) ac+=aluguelPorMes[i];
-      const sacAcum=sacAmort?.rows[i]?(sacAmort.rows[i].cumInstall+sacAmort.rows[i].cumAmortExtra+entrada+fgts):null;
-      const priceAcum=priceAmort?.rows[i]?(priceAmort.rows[i].cumInstall+priceAmort.rows[i].cumAmortExtra+entrada+fgts):null;
-      return {
-        month:i+1,
-        SAC:sac.rows[i]?sac.rows[i].cumInstall+entrada+fgts:null,
-        Price:price.rows[i]?price.rows[i].cumInstall+entrada+fgts:null,
-        "Consórcio":cons.rows[i]?cons.rows[i].cumInstall+ac:null,
-        "SAC+":sacAcum,
-        "Price+":priceAcum,
-      };
-    });
-  },[sac.rows,price.rows,cons.rows,sacAmort,priceAmort,maxM,entrada,fgts,aluguelPorMes]);
+  const totaisList=[{label:"SAC",value:sacTotal,color:C.sac},{label:"Price",value:priceTotal,color:C.price},{label:"Consórcio",value:consTotal,color:C.cons}];
+  const minT=Math.min(...totaisList.map(t=>t.value));
 
   return (
     <div style={{background:C.bg,minHeight:"100vh",fontFamily:F.body}}>
 
       {/* HEADER */}
-      <div style={{background:"#fff",borderBottom:`1px solid ${C.border}`,padding:"16px 32px",display:"flex",alignItems:"center",gap:16,position:"sticky",top:0,zIndex:100,boxShadow:"0 1px 8px rgba(0,0,0,0.05)"}}>
-        <div style={{width:6,height:36,borderRadius:3,background:C.accent,flexShrink:0}}/>
+      <div style={{background:C.panel,borderBottom:`1px solid ${C.border}`,padding:"14px 28px",display:"flex",alignItems:"center",gap:14,position:"sticky",top:0,zIndex:100}}>
+        <div style={{width:3,height:28,borderRadius:2,background:C.accent,flexShrink:0}}/>
         <div>
-          <div style={{fontFamily:F.display,fontSize:22,fontWeight:700,color:C.text,lineHeight:1.1}}>Simulador de Financiamento Imobiliário</div>
-          <div style={{fontSize:13,color:C.muted,marginTop:3}}>Comparativo entre SAC, Price e Consórcio — custo total ao final do prazo</div>
+          <div style={{fontSize:15,fontWeight:600,color:C.text,lineHeight:1.2,fontFamily:F.body}}>Simulador de Financiamento Imobiliário</div>
+          <div style={{fontSize:11,color:C.muted,marginTop:2,fontFamily:F.body}}>by Geraldo Búrigo, CNPI · comparativo SAC · Price · Consórcio</div>
         </div>
       </div>
 
-      <div className="sim-main" style={{maxWidth:1100,margin:"0 auto",padding:"28px 20px"}}>
+      <div className="sim-main" style={{maxWidth:1080,margin:"0 auto",padding:"24px 16px"}}>
 
         {/* INPUTS */}
-        <div className="sim-inputs" style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:16,marginBottom:24}}>
-          <InputPanel accentColor={C.sac} label="Financiamento Imobiliário (SAC e Price)">
+        <SectionTag>parâmetros da simulação</SectionTag>
+        <div className="sim-inputs" style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:12,marginBottom:20}}>
+          <InputPanel accentColor={C.sac} label="financiamento imobiliário — SAC e Price">
             <InputMoney label="Valor do imóvel"  value={imovel}  onChange={setImovel}/>
             <InputMoney label="Entrada"          value={entrada} onChange={setEntrada}/>
-            <InputMoney label="FGTS"             value={fgts}    onChange={setFgts} hint="Opcional · reduz o principal financiado"/>
-            <InputPct   label="CET anual"        value={juros}   onChange={setJuros} hint={`Financia ${brl(principal)} · inclui juros, seguros e taxas`}/>
+            <InputMoney label="FGTS"             value={fgts}    onChange={setFgts} hint={`Financia ${brl(principal)}`}/>
+            <InputPct   label="CET anual"        value={juros}   onChange={setJuros} hint="Inclui juros, seguros e taxas"/>
             <InputPct   label="TR anual"         value={trAnual} onChange={setTrAnual}/>
             <InputInt   label="Prazo (meses)"    value={prazoFin} onChange={setPrazoFin}/>
-            {/* AMORTIZAÇÕES EXTRAORDINÁRIAS */}
+
+            {/* AMORTIZAÇÕES */}
             <div style={{borderTop:`1px solid ${C.border}`,paddingTop:12,marginTop:2}}>
               <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:10}}>
-                <div style={{fontSize:11,fontWeight:700,color:C.muted,textTransform:"uppercase",letterSpacing:"0.07em"}}>Amortizações extraordinárias</div>
-                <button onClick={()=>setAmortAtiva(a=>!a)} style={{padding:"4px 12px",borderRadius:8,border:`1.5px solid ${amortAtiva?C.sac:C.border}`,background:amortAtiva?"#eff6ff":"#fff",color:amortAtiva?C.sac:C.muted,fontFamily:F.body,fontSize:11,fontWeight:700,cursor:"pointer"}}>
-                  {amortAtiva?"Ativado ✓":"Ativar"}
+                <div style={{fontSize:10,fontWeight:600,color:C.muted,textTransform:"uppercase",letterSpacing:"0.07em"}}>amortizações extraordinárias</div>
+                <button onClick={()=>setAmortAtiva(a=>!a)} style={{padding:"4px 12px",borderRadius:6,border:`1px solid ${amortAtiva?C.sac:C.border}`,background:amortAtiva?"rgba(96,165,250,0.1)":"transparent",color:amortAtiva?C.sac:C.muted,fontFamily:F.body,fontSize:11,fontWeight:600}}>
+                  {amortAtiva?"ativado ✓":"ativar"}
                 </button>
               </div>
               {amortAtiva&&(
                 <div style={{display:"flex",flexDirection:"column",gap:12}}>
-                  <InputMoney label="Complemento mensal" value={amortMensal} onChange={setAmortMensal} hint="Valor extra pago todo mês além da parcela"/>
-                  
-                  {/* Amortização anual */}
+                  <InputMoney label="Complemento mensal" value={amortMensal} onChange={setAmortMensal} hint="Valor extra além da parcela"/>
                   <div>
-                    <div style={{fontSize:12,fontWeight:600,color:C.muted,marginBottom:6,textTransform:"uppercase",letterSpacing:"0.07em"}}>Amortização anual</div>
+                    <div style={{fontSize:10,fontWeight:600,color:C.muted,marginBottom:6,textTransform:"uppercase",letterSpacing:"0.07em"}}>amortização anual</div>
                     <div style={{display:"flex",gap:6,marginBottom:8}}>
                       {[{v:"todo_ano",label:"Todo ano"},{v:"uma_vez",label:"Uma vez"}].map(op=>(
-                        <button key={op.v} onClick={()=>setAmortPeriodicidade(op.v)} style={{flex:1,padding:"6px 8px",borderRadius:8,border:`1.5px solid ${amortPeriodicidade===op.v?C.sac:C.border}`,background:amortPeriodicidade===op.v?"#eff6ff":"#fff",color:amortPeriodicidade===op.v?C.sac:C.muted,fontFamily:F.body,fontSize:12,fontWeight:600,cursor:"pointer",transition:"all 0.15s"}}>
+                        <button key={op.v} onClick={()=>setAmortPeriodicidade(op.v)} style={{flex:1,padding:"5px 8px",borderRadius:6,border:`1px solid ${amortPeriodicidade===op.v?C.sac:C.border}`,background:amortPeriodicidade===op.v?"rgba(96,165,250,0.1)":"transparent",color:amortPeriodicidade===op.v?C.sac:C.muted,fontFamily:F.body,fontSize:11,fontWeight:600,transition:"all 0.15s"}}>
                           {op.label}
                         </button>
                       ))}
                     </div>
                     <div style={{display:"grid",gridTemplateColumns:amortPeriodicidade==="uma_vez"?"1fr 1fr 1fr":"1fr 1fr",gap:8}}>
-                      <InputMoney label="Valor" value={amortAnual} onChange={setAmortAnual} hint="Aporte extra"/>
-                      {amortPeriodicidade==="uma_vez"&&(
-                        <InputInt label="Ano" value={amortAno} onChange={setAmortAno} hint="Ex: 5 = 5º ano"/>
-                      )}
+                      <InputMoney label="Valor" value={amortAnual} onChange={setAmortAnual}/>
+                      {amortPeriodicidade==="uma_vez"&&<InputInt label="Ano" value={amortAno} onChange={setAmortAno} hint="Ex: 5 = 5º ano"/>}
                       <InputInt label="Mês" value={amortMesAnual} onChange={setAmortMesAnual} hint="1=jan · 12=dez"/>
                     </div>
-                    {amortPeriodicidade==="uma_vez"&&amortAnual>0&&(
-                      <div style={{fontSize:11,color:C.muted,marginTop:6,background:C.soft,borderRadius:8,padding:"6px 10px"}}>
-                        Aporte de {brl(amortAnual)} no mês {((amortAno-1)*12)+amortMesAnual} (ano {amortAno}, {["jan","fev","mar","abr","mai","jun","jul","ago","set","out","nov","dez"][(amortMesAnual-1)]||"dez"})
-                      </div>
-                    )}
                   </div>
                   <div>
-                    <div style={{fontSize:12,fontWeight:600,color:C.muted,marginBottom:6,textTransform:"uppercase",letterSpacing:"0.07em"}}>Efeito da amortização</div>
+                    <div style={{fontSize:10,fontWeight:600,color:C.muted,marginBottom:6,textTransform:"uppercase",letterSpacing:"0.07em"}}>efeito da amortização</div>
                     <div style={{display:"flex",gap:8}}>
-                      {[{v:"prazo",label:"Reduz o prazo"},{ v:"parcela",label:"Reduz a parcela"}].map(op=>(
-                        <button key={op.v} onClick={()=>setAmortEfeito(op.v)} style={{flex:1,padding:"8px 10px",borderRadius:8,border:`1.5px solid ${amortEfeito===op.v?C.sac:C.border}`,background:amortEfeito===op.v?"#eff6ff":"#fff",color:amortEfeito===op.v?C.sac:C.muted,fontFamily:F.body,fontSize:12,fontWeight:600,cursor:"pointer",transition:"all 0.15s"}}>
+                      {[{v:"prazo",label:"Reduz prazo"},{v:"parcela",label:"Reduz parcela"}].map(op=>(
+                        <button key={op.v} onClick={()=>setAmortEfeito(op.v)} style={{flex:1,padding:"7px 8px",borderRadius:6,border:`1px solid ${amortEfeito===op.v?C.sac:C.border}`,background:amortEfeito===op.v?"rgba(96,165,250,0.1)":"transparent",color:amortEfeito===op.v?C.sac:C.muted,fontFamily:F.body,fontSize:11,fontWeight:600,transition:"all 0.15s"}}>
                           {op.label}
                         </button>
                       ))}
@@ -1260,29 +927,27 @@ export default function App() {
               )}
             </div>
           </InputPanel>
-          <InputPanel accentColor={C.cons} label="Consórcio Imobiliário">
+
+          <InputPanel accentColor={C.cons} label="consórcio imobiliário">
             <InputMoney label="Carta de crédito"         value={carta}     onChange={setCarta}/>
             <InputPct   label="Taxa de administração"    value={admin}     onChange={setAdmin}/>
-            <InputPct   label="Fundo de reserva"         value={fundo}     onChange={setFundo} hint="Típico 2%–4% · tratado como custo"/>
+            <InputPct   label="Fundo de reserva"         value={fundo}     onChange={setFundo} hint="Típico 2%–4%"/>
             <InputPct   label="Indexador anual"          value={idxAnual}  onChange={setIdxAnual}/>
             <InputInt   label="Prazo (meses)"            value={prazoCons} onChange={setPrazoCons}/>
             <InputInt   label="Mês de contemplação"      value={cmMes}     onChange={setCmMes} hint="Estimativa — sem garantia de data"/>
-            <InputMoney label="Lance próprio"            value={lance}     onChange={setLance} hint="Abate o saldo devedor na contemplação"/>
-            <InputMoney label="Aluguel mensal na espera" value={aluguel}   onChange={setAluguel} hint={aluguel>0?`Reajustado pelo indexador · total: ${brl(aluguelTotal)}`:"Opcional · deixe zero para ignorar"}/>
+            <InputMoney label="Lance próprio"            value={lance}     onChange={setLance}/>
+            <InputMoney label="Aluguel mensal na espera" value={aluguel}   onChange={setAluguel} hint={aluguel>0?`Total: ${brl(aluguelTotal)}`:"Opcional"}/>
             <div style={{borderTop:`1px solid ${C.border}`,paddingTop:12,marginTop:2}}>
-              <div style={{fontSize:11,fontWeight:700,color:C.muted,textTransform:"uppercase",letterSpacing:"0.07em",marginBottom:10}}>Promoção de entrada</div>
+              <div style={{fontSize:10,fontWeight:600,color:C.muted,textTransform:"uppercase",letterSpacing:"0.07em",marginBottom:10}}>promoção de entrada</div>
               <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10}}>
-                <InputPct  label="Desconto na parcela" value={promoDesc}  onChange={setPromoDesc}  hint="Ex: 30 = 30% de desconto"/>
-                <InputInt  label="Duração (meses)"     value={promoMeses} onChange={setPromoMeses} hint="Meses com desconto"/>
+                <InputPct  label="Desconto na parcela" value={promoDesc}  onChange={setPromoDesc}/>
+                <InputInt  label="Duração (meses)"     value={promoMeses} onChange={setPromoMeses}/>
               </div>
-              {promoDesc>0&&promoMeses>0&&<div style={{fontSize:11,color:C.muted,marginTop:8,background:C.soft,borderRadius:8,padding:"8px 10px",lineHeight:1.6}}>
-                Parcela inicial: <strong style={{color:C.cons}}>{brl(cons.totals?.installFirst||0)}</strong> (com desconto) · sem desconto seria <strong>{brl((cons.totals?.installFirst||0)/(1-promoDesc/100))}</strong>
-              </div>}
             </div>
           </InputPanel>
         </div>
 
-        {/* RESUMO EXECUTIVO */}
+        {/* RESUMO */}
         {(()=>{
           const menorTotal=Math.min(sacTotal,priceTotal,consTotal);
           const melhor=sacTotal===menorTotal?"SAC":priceTotal===menorTotal?"Price":"Consórcio";
@@ -1290,12 +955,12 @@ export default function App() {
           const melhorFin=sacTotal<=priceTotal?"SAC":"Price";
           const cartaVsImovel=ct.cartaTravada>0?ct.cartaTravada-imovel:0;
           return (
-            <div style={{background:`linear-gradient(135deg, ${C.accentBg} 0%, #fff 100%)`,border:`1.5px solid ${C.accent}`,borderRadius:16,padding:"20px 24px",marginBottom:20,boxShadow:"0 2px 12px rgba(45,158,80,0.08)"}}>
-              <div style={{fontSize:11,fontWeight:700,color:C.accent,textTransform:"uppercase",letterSpacing:"0.09em",marginBottom:12,fontFamily:F.body}}>Resumo da simulação</div>
-              <div style={{fontSize:16,color:C.text,fontFamily:F.body,lineHeight:1.8}}>
+            <div style={{background:C.accentBg,border:`1px solid rgba(163,230,53,0.2)`,borderRadius:10,padding:"16px 20px",marginBottom:16}}>
+              <div style={{fontSize:10,fontWeight:600,color:C.accent,textTransform:"uppercase",letterSpacing:"0.08em",marginBottom:8,fontFamily:F.body}}>//  resumo da simulação</div>
+              <div style={{fontSize:13,color:C.text,fontFamily:F.body,lineHeight:1.8}}>
                 {melhor==="Consórcio"
-                  ? <>O <strong>consórcio</strong> tem o menor desembolso total ({brl(consTotal)}), <strong>{brl(difConsFinanc)} a menos</strong> que o {melhorFin}. Porém você acessa o imóvel apenas no <strong>mês {cmSafe}</strong> e recebe uma carta de <strong>{brl(ct.cartaTravada)}</strong> — {cartaVsImovel>0?<>{brl(cartaVsImovel)} acima do valor atual do imóvel, reajustada pelo indexador.</>:<>abaixo do valor atual do imóvel.</>}</>
-                  : <>O <strong>{melhor}</strong> tem o menor desembolso total ({brl(menorTotal)}). O consórcio custaria <strong>{brl(difConsFinanc)} a mais</strong>, mas entrega uma carta de <strong>{brl(ct.cartaTravada)}</strong> na contemplação (mês {cmSafe}), {cartaVsImovel>0?<><strong>{brl(cartaVsImovel)} acima</strong> do valor atual do imóvel.</>:<>abaixo do valor atual do imóvel.</>} No financiamento você tem o imóvel <strong>imediatamente</strong>.</>
+                  ?<>O <strong style={{color:C.cons}}>consórcio</strong> tem o menor desembolso total ({brl(consTotal)}), <strong>{brl(difConsFinanc)} a menos</strong> que o {melhorFin}. Acesso ao imóvel no <strong>mês {cmSafe}</strong>, carta de <strong>{brl(ct.cartaTravada)}</strong> — {cartaVsImovel>0?<>{brl(cartaVsImovel)} acima do valor atual.</>:<>abaixo do valor atual.</>}</>
+                  :<>O <strong style={{color:melhor==="SAC"?C.sac:C.price}}>{melhor}</strong> tem o menor desembolso total ({brl(menorTotal)}). O consórcio custaria <strong>{brl(difConsFinanc)} a mais</strong>, mas entrega uma carta de <strong>{brl(ct.cartaTravada)}</strong> no mês {cmSafe}. No financiamento você tem o imóvel <strong>imediatamente</strong>.</>
                 }
               </div>
             </div>
@@ -1303,183 +968,111 @@ export default function App() {
         })()}
 
         {/* DESTAQUES */}
-        {(()=>{
-          const cols=[
-            {id:"sac",  label:"SAC",        value:sacTotal,        color:C.sac,   pFirst:st.installFirst,  pLast:st.installLast,  extra:null,
-             amortData:sacAmort,  amortTotal:sacAmort?(sacAmort.totals.totalPaid||0)+entrada+fgts:null},
-            {id:"price",label:"Price",       value:priceTotal,      color:C.price, pFirst:pt.installFirst,  pLast:pt.installLast,  extra:null,
-             amortData:priceAmort,amortTotal:priceAmort?(priceAmort.totals.totalPaid||0)+entrada+fgts:null},
-            {id:"cons", label:"Consórcio",   value:consTotal,       color:C.cons,  pFirst:ct.installFirst,  pLast:ct.installLast,  extra:null,
-             amortData:null,amortTotal:null},
-          ];
-          const allVals=[sacTotal,priceTotal,consTotal];
-          const minV=Math.min(...allVals);
-          const renderCard=(t,isAmort)=>{
-            const val=isAmort?t.amortTotal:t.value;
-            const pFirst=isAmort?t.amortData?.totals?.installFirst:t.pFirst;
-            const pLast=isAmort?t.amortData?.totals?.installLast:t.pLast;
-            const prazo=isAmort&&t.amortData?.totals;
-            const isMin=val===minV&&!isAmort;
-            const bg=isMin?C.accentBg:isAmort?"#fafcff":"#fafcfa";
-            const bdr=isMin?C.accent:isAmort?`${t.color}44`:C.border;
-            if(isAmort&&!t.amortData) return <div key={t.id+"a"} style={{flex:1}}/>;
+        <SectionTag>total desembolsado</SectionTag>
+        <div className="sim-hl-cols" style={{display:"flex",gap:10,marginBottom:16}}>
+          {totaisList.map(t=>{
+            const isMin=t.value===minT;
             return (
-              <div key={t.id+(isAmort?"a":"")} style={{flex:1,borderRadius:12,padding:"14px 12px",textAlign:"center",background:bg,border:`1.5px solid ${bdr}`}}>
-                <div style={{fontSize:10,fontWeight:700,color:t.color,marginBottom:6,textTransform:"uppercase",letterSpacing:"0.06em",fontFamily:F.body}}>
-                  {isAmort?t.label+" +amort.":t.label}
-                </div>
-                {val!=null&&<div style={{fontSize:isAmort?16:20,fontWeight:700,color:isMin?C.accent:C.text,fontFamily:F.display,lineHeight:1.1}}>{brl(val)}</div>}
-                {isMin&&<div style={{fontSize:10,color:C.accent,marginTop:4,fontWeight:700}}>✓ menor</div>}
-                <div style={{marginTop:10,paddingTop:8,borderTop:`1px solid ${isMin?C.borderMid:C.border}`}}>
-                  <div style={{display:"flex",justifyContent:"space-between",fontSize:11,fontFamily:F.body,marginBottom:3}}>
+              <div key={t.label} style={{flex:1,borderRadius:10,padding:"16px",textAlign:"center",background:isMin?C.accentBg:C.panel,border:`1px solid ${isMin?"rgba(163,230,53,0.3)":C.border}`}}>
+                <div style={{fontSize:10,fontWeight:600,color:t.color,marginBottom:8,textTransform:"uppercase",letterSpacing:"0.06em"}}>{t.label}</div>
+                <div style={{fontSize:22,fontWeight:600,color:isMin?C.accent:C.text,letterSpacing:"-0.02em"}}>{brl(t.value)}</div>
+                {isMin&&<div style={{fontSize:10,color:C.accent,marginTop:4,fontWeight:600}}>✓ menor custo</div>}
+                <div style={{marginTop:12,paddingTop:10,borderTop:`1px solid ${C.border}`}}>
+                  <div style={{display:"flex",justifyContent:"space-between",fontSize:11,marginBottom:3}}>
                     <span style={{color:C.muted}}>Parcela inicial</span>
-                    <span style={{fontWeight:500,color:C.text}}>{brl(pFirst)}</span>
+                    <span style={{color:C.text}}>{brl(t.label==="SAC"?st.installFirst:t.label==="Price"?pt.installFirst:ct.installFirst)}</span>
                   </div>
-                  <div style={{display:"flex",justifyContent:"space-between",fontSize:11,fontFamily:F.body}}>
+                  <div style={{display:"flex",justifyContent:"space-between",fontSize:11}}>
                     <span style={{color:C.muted}}>Parcela final</span>
-                    <span style={{fontWeight:500,color:C.text}}>{brl(pLast)}</span>
+                    <span style={{color:C.text}}>{brl(t.label==="SAC"?st.installLast:t.label==="Price"?pt.installLast:ct.installLast)}</span>
                   </div>
-                  {!isAmort&&t.extra&&<div style={{marginTop:5,fontSize:10,color:t.color,fontWeight:600}}>{t.extra}</div>}
-                  {isAmort&&prazo&&amortEfeito==="prazo"&&prazo.mesesEconomizados>0&&(
-                    <div style={{marginTop:5,fontSize:10,color:t.color,fontWeight:600}}>
-                      Encerra mês {prazo.prazoEfetivo} (-{prazo.mesesEconomizados})
-                    </div>
-                  )}
-                  {isAmort&&(
-                    <div style={{display:"flex",justifyContent:"space-between",fontSize:11,fontFamily:F.body,marginTop:5,paddingTop:5,borderTop:`1px solid ${C.border}`}}>
-                      <span style={{color:C.muted}}>Juros econ.</span>
-                      <span style={{fontWeight:600,color:C.accent}}>{brl((t.id==="sac"?st.totalInterest:pt.totalInterest)-(t.amortData.totals.totalInterest||0))}</span>
-                    </div>
-                  )}
                 </div>
               </div>
             );
-          };
-          return (
-            <div style={{background:C.panel,border:`1px solid ${C.border}`,borderRadius:16,padding:20,boxShadow:"0 2px 12px rgba(0,0,0,0.04)",marginBottom:24}}>
-              <div style={{fontSize:11,fontWeight:700,color:C.muted,textTransform:"uppercase",letterSpacing:"0.08em",marginBottom:14,fontFamily:F.body}}>Total desembolsado</div>
-              {/* Linha 1: cards principais */}
-              <div className="sim-hl-cols" style={{display:"flex",gap:10,marginBottom:amortAtiva?10:0}}>
-                {cols.map(t=>renderCard(t,false))}
-              </div>
-              {/* Linha 2: cards com amortização (quando ativa) */}
-              {amortAtiva&&(
-                <div className="sim-hl-cols" style={{display:"flex",gap:10}}>
-                  {cols.map(t=>renderCard(t,true))}
-                </div>
-              )}
-            </div>
-          );
-        })()}
-
-
-
+          })}
+        </div>
 
         {/* CUSTOS DETALHADOS */}
-        <CustosDetalhados
-          st={st} pt={pt} ct={ct}
-          sacTotal={sacTotal} priceTotal={priceTotal} consTotal={consTotal}
-          principal={principal} entrada={entrada} fgts={fgts}
-          aluguelTotal={aluguelTotal} cmSafe={cmSafe}
-        />
+        <CustosDetalhados st={st} pt={pt} ct={ct} sacTotal={sacTotal} priceTotal={priceTotal} consTotal={consTotal} principal={principal} entrada={entrada} fgts={fgts} aluguelTotal={aluguelTotal} cmSafe={cmSafe}/>
 
         {/* GRÁFICOS */}
-        <ChartCard title="Evolução das parcelas" subtitle="Parcela mensal em cada modalidade ao longo do tempo. Clique na legenda para mostrar ou ocultar uma linha.">
+        <SectionTag>evolução ao longo do tempo</SectionTag>
+        <ChartCard title="// parcela mensal" subtitle="Evolução mês a mês de cada modalidade. Clique na legenda para ocultar uma linha.">
           <ResponsiveContainer>
             <LineChart data={chartParcelasEx}>
               <CartesianGrid strokeDasharray="3 3" stroke={C.border}/>
-              <XAxis dataKey="month" tick={{fontSize:11,fontFamily:F.body,fill:C.muted}}/>
-              <YAxis tickFormatter={v=>`R$${(v/1000).toFixed(0)}k`} tick={{fontSize:11,fontFamily:F.body,fill:C.muted}}/>
+              <XAxis dataKey="month" tick={{fontSize:10,fontFamily:F.body,fill:C.muted}}/>
+              <YAxis tickFormatter={v=>`${(v/1000).toFixed(0)}k`} tick={{fontSize:10,fontFamily:F.body,fill:C.muted}}/>
               <Tooltip content={<CustomTooltip/>}/>
               <Legend content={<CustomLegend/>}/>
-              <ReferenceLine x={cmSafe} stroke={C.cons} strokeDasharray="5 4" label={{value:"Contemplação",fill:C.cons,fontSize:10,fontFamily:F.body}}/>
-              <Line type="monotone" dataKey="SAC" stroke={C.sac} strokeWidth={2.5} dot={false} strokeLinecap="round" hide={!visibleLines.SAC}/>
-              <Line type="monotone" dataKey="Price" stroke={C.price} strokeWidth={2.5} dot={false} strokeLinecap="round" hide={!visibleLines.Price}/>
-              <Line type="monotone" dataKey="Consórcio" stroke={C.cons} strokeWidth={2.5} dot={false} strokeLinecap="round" hide={!visibleLines["Consórcio"]}/>
-              {amortAtiva&&<Line type="monotone" dataKey="SAC+" stroke={C.sac} strokeWidth={2} strokeDasharray="6 3" dot={false} hide={!visibleLines["SAC+"]} connectNulls={false}/>}
-              {amortAtiva&&<Line type="monotone" dataKey="Price+" stroke={C.price} strokeWidth={2} strokeDasharray="6 3" dot={false} hide={!visibleLines["Price+"]} connectNulls={false}/>}
+              <ReferenceLine x={cmSafe} stroke={C.cons} strokeDasharray="5 4" label={{value:"contemplação",fill:C.cons,fontSize:10}}/>
+              <Line type="monotone" dataKey="SAC" stroke={C.sac} strokeWidth={2} dot={false} hide={!visibleLines.SAC}/>
+              <Line type="monotone" dataKey="Price" stroke={C.price} strokeWidth={2} dot={false} hide={!visibleLines.Price}/>
+              <Line type="monotone" dataKey="Consórcio" stroke={C.cons} strokeWidth={2} dot={false} hide={!visibleLines["Consórcio"]}/>
+              {amortAtiva&&<Line type="monotone" dataKey="SAC+" stroke={C.sac} strokeWidth={1.5} strokeDasharray="5 3" dot={false} hide={!visibleLines["SAC+"]}/>}
+              {amortAtiva&&<Line type="monotone" dataKey="Price+" stroke={C.price} strokeWidth={1.5} strokeDasharray="5 3" dot={false} hide={!visibleLines["Price+"]}/>}
             </LineChart>
           </ResponsiveContainer>
         </ChartCard>
 
-        <ChartCard title="Desembolso total acumulado" subtitle="Tudo que saiu do bolso acumulado mês a mês (parcelas + entrada/lance + aluguel). Clique na legenda para mostrar ou ocultar uma linha.">
+        <ChartCard title="// desembolso acumulado" subtitle="Tudo que saiu do bolso acumulado (parcelas + entrada/lance + aluguel).">
           <ResponsiveContainer>
-            <LineChart data={chartDesembolsoEx}>
+            <LineChart data={chartDesembolso}>
               <CartesianGrid strokeDasharray="3 3" stroke={C.border}/>
-              <XAxis dataKey="month" tick={{fontSize:11,fontFamily:F.body,fill:C.muted}}/>
-              <YAxis tickFormatter={v=>`R$${(v/1000).toFixed(0)}k`} tick={{fontSize:11,fontFamily:F.body,fill:C.muted}}/>
+              <XAxis dataKey="month" tick={{fontSize:10,fontFamily:F.body,fill:C.muted}}/>
+              <YAxis tickFormatter={v=>`${(v/1000).toFixed(0)}k`} tick={{fontSize:10,fontFamily:F.body,fill:C.muted}}/>
               <Tooltip content={<CustomTooltip/>}/>
               <Legend content={<CustomLegend/>}/>
-              <ReferenceLine x={cmSafe} stroke={C.cons} strokeDasharray="5 4" label={{value:"Contemplação",fill:C.cons,fontSize:10,fontFamily:F.body}}/>
-              <Line type="monotone" dataKey="SAC" stroke={C.sac} strokeWidth={2.5} dot={false} strokeLinecap="round" hide={!visibleLines.SAC}/>
-              <Line type="monotone" dataKey="Price" stroke={C.price} strokeWidth={2.5} dot={false} strokeLinecap="round" hide={!visibleLines.Price}/>
-              <Line type="monotone" dataKey="Consórcio" stroke={C.cons} strokeWidth={2.5} dot={false} strokeLinecap="round" hide={!visibleLines["Consórcio"]}/>
-              {amortAtiva&&<Line type="monotone" dataKey="SAC+" stroke={C.sac} strokeWidth={2} strokeDasharray="6 3" dot={false} hide={!visibleLines["SAC+"]}/>}
-              {amortAtiva&&<Line type="monotone" dataKey="Price+" stroke={C.price} strokeWidth={2} strokeDasharray="6 3" dot={false} hide={!visibleLines["Price+"]}/>}
+              <ReferenceLine x={cmSafe} stroke={C.cons} strokeDasharray="5 4" label={{value:"contemplação",fill:C.cons,fontSize:10}}/>
+              <Line type="monotone" dataKey="SAC" stroke={C.sac} strokeWidth={2} dot={false} hide={!visibleLines.SAC}/>
+              <Line type="monotone" dataKey="Price" stroke={C.price} strokeWidth={2} dot={false} hide={!visibleLines.Price}/>
+              <Line type="monotone" dataKey="Consórcio" stroke={C.cons} strokeWidth={2} dot={false} hide={!visibleLines["Consórcio"]}/>
             </LineChart>
           </ResponsiveContainer>
         </ChartCard>
 
-        <ChartCard title="Patrimônio líquido ao longo do tempo" subtitle="Valor do imóvel reajustado menos saldo devedor. Consórcio parte do zero — patrimônio existe só após a contemplação. Clique na legenda para mostrar ou ocultar uma linha.">
+        <ChartCard title="// patrimônio líquido" subtitle="Valor do imóvel reajustado menos saldo devedor. Consórcio parte do zero até a contemplação.">
           <ResponsiveContainer>
             <LineChart data={chartPatrimonio}>
               <CartesianGrid strokeDasharray="3 3" stroke={C.border}/>
-              <XAxis dataKey="month" tick={{fontSize:11,fontFamily:F.body,fill:C.muted}}/>
-              <YAxis tickFormatter={v=>`R$${(v/1000).toFixed(0)}k`} tick={{fontSize:11,fontFamily:F.body,fill:C.muted}}/>
+              <XAxis dataKey="month" tick={{fontSize:10,fontFamily:F.body,fill:C.muted}}/>
+              <YAxis tickFormatter={v=>`${(v/1000).toFixed(0)}k`} tick={{fontSize:10,fontFamily:F.body,fill:C.muted}}/>
               <Tooltip content={<CustomTooltip/>}/>
               <Legend content={<CustomLegend/>}/>
-              <ReferenceLine x={cmSafe} stroke={C.cons} strokeDasharray="5 4" label={{value:"Contemplação",fill:C.cons,fontSize:10,fontFamily:F.body}}/>
-              <Line type="monotone" dataKey="SAC" stroke={C.sac} strokeWidth={2.5} dot={false} strokeLinecap="round" hide={!visibleLines.SAC}/>
-              <Line type="monotone" dataKey="Price" stroke={C.price} strokeWidth={2.5} dot={false} strokeLinecap="round" hide={!visibleLines.Price}/>
-              <Line type="monotone" dataKey="Consórcio" stroke={C.cons} strokeWidth={2.5} dot={false} strokeLinecap="round" hide={!visibleLines["Consórcio"]}/>
+              <ReferenceLine x={cmSafe} stroke={C.cons} strokeDasharray="5 4" label={{value:"contemplação",fill:C.cons,fontSize:10}}/>
+              <Line type="monotone" dataKey="SAC" stroke={C.sac} strokeWidth={2} dot={false} hide={!visibleLines.SAC}/>
+              <Line type="monotone" dataKey="Price" stroke={C.price} strokeWidth={2} dot={false} hide={!visibleLines.Price}/>
+              <Line type="monotone" dataKey="Consórcio" stroke={C.cons} strokeWidth={2} dot={false} hide={!visibleLines["Consórcio"]}/>
             </LineChart>
           </ResponsiveContainer>
         </ChartCard>
 
-        <ChartCard title="Evolução do saldo devedor" subtitle="Quanto ainda falta pagar do principal ao longo do tempo. SAC cai mais rápido no início · Price cai mais devagar no início mas equaliza. Clique na legenda para mostrar ou ocultar uma linha.">
+        <ChartCard title="// saldo devedor" subtitle="Quanto ainda falta pagar do principal. SAC cai mais rápido no início.">
           <ResponsiveContainer>
             <LineChart data={chartSaldo}>
               <CartesianGrid strokeDasharray="3 3" stroke={C.border}/>
-              <XAxis dataKey="month" tick={{fontSize:11,fontFamily:F.body,fill:C.muted}}/>
-              <YAxis tickFormatter={v=>`R$${(v/1000).toFixed(0)}k`} tick={{fontSize:11,fontFamily:F.body,fill:C.muted}}/>
+              <XAxis dataKey="month" tick={{fontSize:10,fontFamily:F.body,fill:C.muted}}/>
+              <YAxis tickFormatter={v=>`${(v/1000).toFixed(0)}k`} tick={{fontSize:10,fontFamily:F.body,fill:C.muted}}/>
               <Tooltip content={<CustomTooltip/>}/>
-              <Legend content={({payload})=>(
-                <div style={{display:"flex",justifyContent:"center",gap:20,marginTop:8,flexWrap:"wrap"}}>
-                  {[{value:"SAC",color:C.sac},{value:"Price",color:C.price},
-                    ...(amortAtiva?[{value:"SAC+",color:C.sac,dashed:true},{value:"Price+",color:C.price,dashed:true}]:[])
-                  ].map((p,i)=>{
-                    const active=visibleLines[p.value];
-                    return (
-                      <div key={i} onClick={()=>toggleLine(p.value)}
-                        style={{display:"flex",alignItems:"center",gap:6,cursor:"pointer",opacity:active?1:0.35,transition:"opacity 0.2s",userSelect:"none"}}>
-                        <div style={{width:24,height:3,borderRadius:2,background:p.color,opacity:p.dashed?0.6:1,
-                          backgroundImage:p.dashed?"repeating-linear-gradient(90deg,currentColor 0,currentColor 6px,transparent 6px,transparent 9px)":"none"}}/>
-                        <span style={{fontSize:12,fontFamily:F.body,color:active?C.text:C.muted,fontWeight:active?500:400,textDecoration:active?"none":"line-through"}}>{p.value}</span>
-                      </div>
-                    );
-                  })}
-                </div>
-              )}/>
-              <Line type="monotone" dataKey="SAC" stroke={C.sac} strokeWidth={2.5} dot={false} strokeLinecap="round" hide={!visibleLines.SAC}/>
-              <Line type="monotone" dataKey="Price" stroke={C.price} strokeWidth={2.5} dot={false} strokeLinecap="round" hide={!visibleLines.Price}/>
-              {amortAtiva&&<Line type="monotone" dataKey="SAC+" stroke={C.sac} strokeWidth={2} strokeDasharray="6 3" dot={false} hide={!visibleLines["SAC+"]}/>}
-              {amortAtiva&&<Line type="monotone" dataKey="Price+" stroke={C.price} strokeWidth={2} strokeDasharray="6 3" dot={false} hide={!visibleLines["Price+"]}/>}
+              <Legend content={<CustomLegend/>}/>
+              <Line type="monotone" dataKey="SAC" stroke={C.sac} strokeWidth={2} dot={false} hide={!visibleLines.SAC}/>
+              <Line type="monotone" dataKey="Price" stroke={C.price} strokeWidth={2} dot={false} hide={!visibleLines.Price}/>
+              {amortAtiva&&<Line type="monotone" dataKey="SAC+" stroke={C.sac} strokeWidth={1.5} strokeDasharray="5 3" dot={false} hide={!visibleLines["SAC+"]}/>}
+              {amortAtiva&&<Line type="monotone" dataKey="Price+" stroke={C.price} strokeWidth={1.5} strokeDasharray="5 3" dot={false} hide={!visibleLines["Price+"]}/>}
             </LineChart>
           </ResponsiveContainer>
         </ChartCard>
 
-        {/* HISTÓRICO DE PARCELAS */}
+        {/* HISTÓRICO, FLUXO E CENÁRIOS */}
+        <SectionTag>tabelas detalhadas</SectionTag>
         <HistoricoTabela sac={sac} price={price} cons={cons} cmSafe={cmSafe} carta={carta} admin={admin} fundo={fundo} prazoCons={prazoCons}/>
-
-        {/* FLUXO DE CAIXA */}
-        <FluxoCaixa sac={sac} price={price} cons={cons} cmSafe={cmSafe} entrada={entrada} fgts={fgts} lance={ct.lanceEfetivo||0} aluguelPorMes={aluguelPorMes} sacAmort={sacAmort} priceAmort={priceAmort} amortAtiva={amortAtiva} amortMesAnual={amortMesAnual}/>
-
-        {/* CENÁRIOS DE CONTEMPLAÇÃO */}
+        <FluxoCaixa sac={sac} price={price} cons={cons} cmSafe={cmSafe} entrada={entrada} fgts={fgts} lance={ct.lanceEfetivo||0} aluguelPorMes={aluguelPorMes} sacAmort={sacAmort} priceAmort={priceAmort} amortAtiva={amortAtiva}/>
         <CenariosContemplacao cenarios={cenarios} cmSafe={cmSafe}/>
 
         {/* NOTA */}
-        <div style={{background:C.goldBg,border:"1px solid #e8d48a",borderRadius:12,padding:"14px 18px",fontSize:12,color:"#6b4f10",lineHeight:1.7,fontFamily:F.body}}>
-          <strong>Premissas:</strong> imóvel reajustado pelo indexador do consórcio. Antes da contemplação o patrimônio do consórcio é zero — a carta é uma promessa de crédito, não um ativo. Não considera FGTS no patrimônio, benfeitorias ou variações de mercado acima do indexador. O mês de contemplação é uma estimativa.
+        <div style={{background:"rgba(251,191,36,0.07)",border:"1px solid rgba(251,191,36,0.2)",borderRadius:10,padding:"12px 16px",fontSize:11,color:C.muted,lineHeight:1.7}}>
+          <span style={{color:"#fbbf24",fontWeight:600}}>// premissas · </span>
+          Imóvel reajustado pelo indexador do consórcio. Antes da contemplação o patrimônio do consórcio é zero. Não considera FGTS no patrimônio, benfeitorias ou variações acima do indexador. O mês de contemplação é uma estimativa. Conteúdo educacional — não constitui recomendação de investimento.
         </div>
 
       </div>
