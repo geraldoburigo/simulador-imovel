@@ -261,7 +261,27 @@ function calcConsorcio(carta,months,adminPct,fundoReservaPct,idxM,cm,lance,promo
     return {month:m,installment,installmentBase:parcelaBase_m,idxAdj,cumInstall,isPos:m>cm};
   });
   const last=rows[rows.length-1];
-  return {rows,totals:{installFirst:rows[0]?.installment||0,installLast:last?.installment||0,totalAdm:adminCost,totalFundo:fundoCost,totalIdxPre:idxPre,totalIdxPos:idxPos,totalPaid:last?.cumInstall||0,totalAmort:cartaTravada,cartaTravada,lanceEfetivo},meta:{cartaTravada,lanceEfetivo,adminCost,fundoCost,idxPre,idxPos,cm,promoDescPct:promoD,promoMeses:promoM}};
+  return {rows,totals:{installFirst:rows[0]?.installment||0,installLast:last?.installment||0,totalAdm:adminCost,totalFundo:fundoCost,totalIdxPre:idxPre,totalIdxPos:idxPos,totalPaid:last?.cumInstall||0,totalAmort:cartaTravada,cartaTravada,lanceEfetivo,saldoPos},meta:{cartaTravada,lanceEfetivo,adminCost,fundoCost,idxPre,idxPos,cm,promoDescPct:promoD,promoMeses:promoM}};
+}
+// ─── CALC: CAPITAL INVESTIDO (custo de oportunidade / alavancagem) ────────────
+// Simula o capital que NÃO foi usado como entrada/lance sendo investido a uma
+// taxa de referência, com a parcela mensal de cada modalidade descontada desse
+// mesmo capital (cenário conservador: a parcela "se paga" com o rendimento,
+// sem depender de renda extra). `desembolsoMes0` sai antes do mês 1 (entrada de
+// financiamento); `desembolsoExtra` sai num mês específico (lance do consórcio,
+// pago só na contemplação — por isso o capital rende integralmente até lá).
+function calcCapitalAlavancado(capitalTotal,desembolsoMes0,rInvestM,parcelasPorMes,meses,desembolsoExtra=0,mesDesembolsoExtra=null) {
+  let bal=Math.max(capitalTotal,0)-Math.max(desembolsoMes0,0);
+  let mesInsuficiente=null;
+  const rows=[];
+  for(let m=1;m<=meses;m++){
+    bal=bal*(1+rInvestM);
+    bal-=(parcelasPorMes[m-1]||0);
+    if(desembolsoExtra>0&&m===mesDesembolsoExtra) bal-=desembolsoExtra;
+    if(bal<0&&mesInsuficiente===null) mesInsuficiente=m;
+    rows.push({month:m,bal});
+  }
+  return {rows,final:bal,mesInsuficiente};
 }
 // ─── INPUTS ───────────────────────────────────────────────────────────────────
 const iBase={width:"100%",marginTop:5,padding:"10px 12px",border:`1px solid ${C.borderMid}`,borderRadius:7,fontSize:14,background:C.panel2,boxSizing:"border-box",color:C.text,outline:"none",fontFamily:F.body,transition:"border-color 0.15s"};
@@ -1021,6 +1041,77 @@ function CustosDetalhadosVeiculo({ft,vct,finTotal,consTotal,principal,entrada,io
     </div>
   );
 }
+// ─── CUSTO DE OPORTUNIDADE / ALAVANCAGEM ──────────────────────────────────────
+// Compara, no mês da contemplação do consórcio, o patrimônio líquido total de
+// cada modalidade: (valor do bem − saldo devedor naquele mês) + o que sobrou do
+// capital total disponível, ainda investido (rendendo, descontada a parcela
+// mensal de cada modalidade — ver calcCapitalAlavancado).
+function AlavancagemPanel({ativa,onToggle,capitalTotal,onCapitalChange,taxaRend,onTaxaChange,cmSafe,itens,bemLabel}) {
+  const [open,setOpen]=useState(true);
+  const thS={padding:"9px 12px",fontSize:10,fontWeight:600,textAlign:"center",color:C.muted,borderBottom:`1px solid ${C.border}`,background:C.panel2,fontFamily:F.body,textTransform:"uppercase",letterSpacing:"0.06em",whiteSpace:"nowrap"};
+  const tdL={padding:"9px 12px",fontSize:12,color:C.text,borderBottom:`1px solid ${C.border}`,fontFamily:F.body};
+  const tdC=(bold,color,hl)=>({padding:"9px 12px",fontSize:12,textAlign:"center",borderBottom:`1px solid ${C.border}`,fontFamily:F.body,fontWeight:bold?700:400,color:color||C.text,background:hl?C.accentHl:"transparent",whiteSpace:"nowrap"});
+  const maxPatrim=itens.length?Math.max(...itens.map(i=>i.patrimonioTotal)):0;
+  const algumInsuficiente=itens.some(i=>i.mesInsuficiente!=null);
+  return (
+    <div style={{background:C.panel,borderRadius:10,border:`1px solid ${C.border}`,overflow:"hidden",marginBottom:16}}>
+      <div style={{background:C.panel2,borderBottom:ativa?`1px solid ${C.border}`:"none",padding:"12px 20px",display:"flex",alignItems:"center",justifyContent:"space-between",gap:10,flexWrap:"wrap"}}>
+        <div style={{display:"flex",alignItems:"center",gap:10}}>
+          <div style={{width:3,height:18,borderRadius:2,background:C.accent,flexShrink:0}}/>
+          <span style={{fontFamily:F.body,fontSize:13,fontWeight:600,color:C.text,letterSpacing:"0.03em"}}>custo de oportunidade / alavancagem</span>
+        </div>
+        <button onClick={onToggle} style={{padding:"4px 12px",borderRadius:6,border:`1px solid ${ativa?C.accent:C.border}`,background:ativa?C.accentBg:"transparent",color:ativa?C.accent:C.muted,fontFamily:F.body,fontSize:11,fontWeight:600}}>
+          {ativa?"ativado ✓":"ativar"}
+        </button>
+      </div>
+      {ativa&&(
+        <div style={{padding:20}}>
+          <div style={{fontSize:11,color:C.muted,fontFamily:F.body,lineHeight:1.6,marginBottom:16}}>
+            Simula usar só o valor de entrada/lance de cada modalidade e manter o restante do seu capital investido, rendendo à taxa abaixo — com a parcela mensal descontada desse rendimento. Compara o patrimônio total (bem − dívida + capital que sobrou) no mês {cmSafe}, quando o consórcio contemplaria.
+          </div>
+          <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:12,marginBottom:18}}>
+            <InputMoney label="Capital total disponível" value={capitalTotal} onChange={onCapitalChange} hint="Quanto você tem em caixa hoje para essa decisão"/>
+            <InputPct   label="Rendimento do capital (a.a.)" value={taxaRend} onChange={onTaxaChange} hint="Taxa da aplicação onde o capital não usado ficaria (ex: CDI líquido)"/>
+          </div>
+          <div style={{overflowX:"auto"}}>
+            <table cellPadding="0" style={{borderCollapse:"separate",borderSpacing:0,width:"100%",minWidth:520}}>
+              <thead>
+                <tr>
+                  <th style={{...thS,textAlign:"left"}}>Modalidade</th>
+                  <th style={thS}>Desembolso imediato</th>
+                  <th style={thS}>Capital ainda investido (mês {cmSafe})</th>
+                  <th style={thS}>Saldo devedor (mês {cmSafe})</th>
+                  <th style={thS}>Patrimônio do {bemLabel}</th>
+                  <th style={thS}>Patrimônio total</th>
+                </tr>
+              </thead>
+              <tbody>
+                {itens.map((it,i)=>{
+                  const isMax=it.patrimonioTotal===maxPatrim;
+                  return (
+                    <tr key={it.label} style={{background:i%2===0?C.panel:C.panel2}}>
+                      <td style={{...tdL,fontWeight:600,color:it.color}}>{it.label}</td>
+                      <td style={tdC()}>{brl(it.desembolso)}</td>
+                      <td style={tdC(false,it.capitalFinal<0?"#f87171":C.text)}>{brl(it.capitalFinal)}</td>
+                      <td style={tdC()}>{brl(it.saldoDevedor)}</td>
+                      <td style={tdC()}>{brl(it.valorAtivo)}</td>
+                      <td style={tdC(isMax,isMax?C.accent:C.text,isMax)}>{brl(it.patrimonioTotal)}{isMax&&" ✓"}</td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+          {algumInsuficiente&&(
+            <div style={{marginTop:12,fontSize:11,color:"#fbbf24",fontFamily:F.body,lineHeight:1.6,background:"rgba(251,191,36,0.07)",border:"1px solid rgba(251,191,36,0.2)",borderRadius:8,padding:"10px 14px"}}>
+              ⚠ {itens.filter(i=>i.mesInsuficiente!=null).map(i=>`${i.label} (a partir do mês ${i.mesInsuficiente})`).join(", ")}: o rendimento do capital não foi suficiente para cobrir a parcela em algum momento — a partir daí, o capital investido passa a ser consumido (ficando negativo), o que na prática exigiria aporte extra de renda.
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
 // ─── APP ──────────────────────────────────────────────────────────────────────
 export default function App() {
   const [modo,setModo]=useState("imovel");
@@ -1060,6 +1151,13 @@ export default function App() {
   const [veicPrazoCons,setVeicPrazoCons]=useState(70);
   const [veicCmMes,setVeicCmMes]=useState(30);
   const [veicLance,setVeicLance]=useState(0);
+  // ── custo de oportunidade / alavancagem ────────────────────────────────────
+  const [alavAtivaImovel,setAlavAtivaImovel]=useState(false);
+  const [capitalTotalImovel,setCapitalTotalImovel]=useState(100000);
+  const [rendCapitalImovel,setRendCapitalImovel]=useState(12);
+  const [alavAtivaVeic,setAlavAtivaVeic]=useState(false);
+  const [capitalTotalVeic,setCapitalTotalVeic]=useState(80000);
+  const [rendCapitalVeic,setRendCapitalVeic]=useState(12);
   const rM=useMemo(()=>annualToMonthly(juros),[juros]);
   const trM=useMemo(()=>annualToMonthly(trAnual),[trAnual]);
   const idxM=useMemo(()=>annualToMonthly(idxAnual),[idxAnual]);
@@ -1079,6 +1177,19 @@ export default function App() {
     return Array.from({length:cmSafe},(_,i)=>aluguelMensal*(1+idxM)**i);
   },[aluguelMensal,cmSafe,idxM]);
   const aluguelTotal=aluguelPorMes.reduce((a,v)=>a+v,0);
+  // ── imóvel: alavancagem / custo de oportunidade ────────────────────────────
+  const rInvestImovelM=annualToMonthly(rendCapitalImovel);
+  const capSac=calcCapitalAlavancado(capitalTotalImovel,entrada,rInvestImovelM,sac.rows.map(r=>r.installment),cmSafe,0,null);
+  const capPrice=calcCapitalAlavancado(capitalTotalImovel,entrada,rInvestImovelM,price.rows.map(r=>r.installment),cmSafe,0,null);
+  const capCons=calcCapitalAlavancado(capitalTotalImovel,0,rInvestImovelM,cons.rows.map(r=>r.installment),cmSafe,ct.lanceEfetivo||0,cmSafe);
+  const saldoFinSacCm=sac.rows[cmSafe-1]?.bal??0;
+  const saldoFinPriceCm=price.rows[cmSafe-1]?.bal??0;
+  const saldoPosConsCm=ct.saldoPos??0;
+  const itensAlavImovel=[
+    {label:"SAC",color:C.sac,desembolso:entrada,capitalFinal:capSac.final,mesInsuficiente:capSac.mesInsuficiente,saldoDevedor:saldoFinSacCm,valorAtivo:Math.max(imovel-saldoFinSacCm,0),patrimonioTotal:Math.max(imovel-saldoFinSacCm,0)+capSac.final},
+    {label:"Price",color:C.price,desembolso:entrada,capitalFinal:capPrice.final,mesInsuficiente:capPrice.mesInsuficiente,saldoDevedor:saldoFinPriceCm,valorAtivo:Math.max(imovel-saldoFinPriceCm,0),patrimonioTotal:Math.max(imovel-saldoFinPriceCm,0)+capPrice.final},
+    {label:"Consórcio",color:C.cons,desembolso:ct.lanceEfetivo||0,capitalFinal:capCons.final,mesInsuficiente:capCons.mesInsuficiente,saldoDevedor:saldoPosConsCm,valorAtivo:Math.max((ct.cartaTravada||0)-saldoPosConsCm,0),patrimonioTotal:Math.max((ct.cartaTravada||0)-saldoPosConsCm,0)+capCons.final},
+  ];
   // ── veículo: derivados ─────────────────────────────────────────────────────
   const veicRM=useMemo(()=>annualToMonthly(veicCET),[veicCET]);
   const veicIdxM=useMemo(()=>annualToMonthly(veicIdx),[veicIdx]);
@@ -1091,6 +1202,16 @@ export default function App() {
   const veicFinTotal=(ft.totalPaid||0)+veicEntrada;
   const veicConsTotal=vct.totalPaid||0;
   const veicMaxM=Math.min(Math.max(veicFin.rows.length,veicCons.rows.length),240);
+  // ── veículo: alavancagem / custo de oportunidade ───────────────────────────
+  const rInvestVeicM=annualToMonthly(rendCapitalVeic);
+  const capVeicFin=calcCapitalAlavancado(capitalTotalVeic,veicEntrada,rInvestVeicM,veicFin.rows.map(r=>r.installment),veicCmSafe,0,null);
+  const capVeicCons=calcCapitalAlavancado(capitalTotalVeic,0,rInvestVeicM,veicCons.rows.map(r=>r.installment),veicCmSafe,vct.lanceEfetivo||0,veicCmSafe);
+  const saldoFinVeicCm=veicFin.rows[veicCmSafe-1]?.bal??0;
+  const saldoPosVeicConsCm=vct.saldoPos??0;
+  const itensAlavVeic=[
+    {label:"Financiamento",color:C.sac,desembolso:veicEntrada,capitalFinal:capVeicFin.final,mesInsuficiente:capVeicFin.mesInsuficiente,saldoDevedor:saldoFinVeicCm,valorAtivo:Math.max(veicValor-saldoFinVeicCm,0),patrimonioTotal:Math.max(veicValor-saldoFinVeicCm,0)+capVeicFin.final},
+    {label:"Consórcio",color:C.cons,desembolso:vct.lanceEfetivo||0,capitalFinal:capVeicCons.final,mesInsuficiente:capVeicCons.mesInsuficiente,saldoDevedor:saldoPosVeicConsCm,valorAtivo:Math.max((vct.cartaTravada||0)-saldoPosVeicConsCm,0),patrimonioTotal:Math.max((vct.cartaTravada||0)-saldoPosVeicConsCm,0)+capVeicCons.final},
+  ];
   const sacTotal=(st.totalPaid||0)+entrada+fgts;
   const priceTotal=(pt.totalPaid||0)+entrada+fgts;
   const consTotal=(ct.totalPaid||0)+aluguelTotal;
@@ -1300,6 +1421,8 @@ export default function App() {
         </div>
         {/* CUSTOS DETALHADOS */}
         <CustosDetalhados st={st} pt={pt} ct={ct} sacTotal={sacTotal} priceTotal={priceTotal} consTotal={consTotal} principal={principal} entrada={entrada} fgts={fgts} aluguelTotal={aluguelTotal} cmSafe={cmSafe} amortAtiva={amortAtiva}/>
+        {/* ALAVANCAGEM */}
+        <AlavancagemPanel ativa={alavAtivaImovel} onToggle={()=>setAlavAtivaImovel(a=>!a)} capitalTotal={capitalTotalImovel} onCapitalChange={setCapitalTotalImovel} taxaRend={rendCapitalImovel} onTaxaChange={setRendCapitalImovel} cmSafe={cmSafe} itens={itensAlavImovel} bemLabel="imóvel"/>
         {/* GRÁFICOS */}
         <SectionTag>evolução ao longo do tempo</SectionTag>
         <ChartCard title="// parcela mensal" subtitle="Evolução mês a mês de cada modalidade. Clique na legenda para ocultar uma linha.">
@@ -1425,6 +1548,8 @@ export default function App() {
         </div>
         {/* CUSTOS DETALHADOS VEÍCULO */}
         <CustosDetalhadosVeiculo ft={ft} vct={vct} finTotal={veicFinTotal} consTotal={veicConsTotal} principal={veicPrincipal} entrada={veicEntrada} iof={veicIofSafe} cmSafe={veicCmSafe}/>
+        {/* ALAVANCAGEM VEÍCULO */}
+        <AlavancagemPanel ativa={alavAtivaVeic} onToggle={()=>setAlavAtivaVeic(a=>!a)} capitalTotal={capitalTotalVeic} onCapitalChange={setCapitalTotalVeic} taxaRend={rendCapitalVeic} onTaxaChange={setRendCapitalVeic} cmSafe={veicCmSafe} itens={itensAlavVeic} bemLabel="veículo"/>
         {/* GRÁFICOS VEÍCULO */}
         <SectionTag>evolução ao longo do tempo</SectionTag>
         <ChartCard title="// parcela mensal" subtitle="Evolução mês a mês de cada modalidade.">
