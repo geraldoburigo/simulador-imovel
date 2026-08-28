@@ -46,6 +46,7 @@ const C = {
   sac:      "#60a5fa",   // azul
   price:    "#fb923c",   // laranja
   cons:     "#4ade80",   // verde
+  avista:   "#c084fc",   // lilás
   // feedback
   goldBg:   "#1c1a10",
 };
@@ -1066,7 +1067,10 @@ function CustosDetalhadosVeiculo({ft,vct,finTotal,consTotal,principal,entrada,io
 // sobrou do capital total disponível, ainda investido (rendendo, descontada a
 // parcela mensal de cada modalidade — ver calcCapitalAlavancado). O consórcio
 // aplica o lance no mês da contemplação (cmSafe), mas o capital de todas
-// continua rendendo/sendo consumido até o horizonte comum.
+// continua rendendo/sendo consumido até o horizonte comum. "À vista" entra
+// como grupo de controle sem nenhuma alavancagem, para responder à pergunta
+// de fundo: vale a pena alavancar (financiar ou fazer consórcio com lance
+// parcial) em vez de simplesmente pagar o bem à vista com o capital disponível?
 function AlavancagemPanel({capitalTotal,onCapitalChange,taxaRend,onTaxaChange,cmSafe,horizonte,itens,bemLabel}) {
   const thS={padding:"9px 12px",fontSize:10,fontWeight:600,textAlign:"center",color:C.muted,borderBottom:`1px solid ${C.border}`,background:C.panel2,fontFamily:F.body,textTransform:"uppercase",letterSpacing:"0.06em",whiteSpace:"nowrap"};
   const tdL={padding:"9px 12px",fontSize:12,color:C.text,borderBottom:`1px solid ${C.border}`,fontFamily:F.body};
@@ -1081,7 +1085,7 @@ function AlavancagemPanel({capitalTotal,onCapitalChange,taxaRend,onTaxaChange,cm
       </div>
       <div style={{padding:20}}>
         <div style={{fontSize:11,color:C.muted,fontFamily:F.body,lineHeight:1.6,marginBottom:16}}>
-          Simula usar só o valor de entrada/lance de cada modalidade e manter o restante do seu capital investido, rendendo à taxa abaixo — com a parcela mensal descontada desse rendimento. O consórcio aplica o lance no mês {cmSafe}, quando contemplaria; as demais seguem pagando parcela normalmente. Quando o rendimento não é suficiente para cobrir a parcela, o capital investido para em zero (não fica negativo) e a diferença é considerada como vindo da sua renda mensal, não de um empréstimo. Compara o patrimônio total (bem − dívida + capital que sobrou) no mês {horizonte}, final do prazo mais longo entre as modalidades.
+          Simula usar só o valor de entrada/lance de cada modalidade e manter o restante do seu capital investido, rendendo à taxa abaixo — com a parcela mensal descontada desse rendimento. "À vista" é a referência sem alavancagem nenhuma: paga o bem inteiro agora e só deixa aplicado o que sobrar do capital total. O consórcio aplica o lance no mês {cmSafe}, quando contemplaria; as demais seguem pagando parcela normalmente. Quando o rendimento não é suficiente para cobrir a parcela, o capital investido para em zero (não fica negativo) e a diferença é considerada como vindo da sua renda mensal, não de um empréstimo. Compara o patrimônio total (bem − dívida + capital que sobrou) no mês {horizonte}, final do prazo mais longo entre as modalidades.
         </div>
         <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:12,marginBottom:18}}>
           <InputMoney label="Capital total disponível" value={capitalTotal} onChange={onCapitalChange} hint="Quanto você tem em caixa hoje para essa decisão"/>
@@ -1309,12 +1313,18 @@ export default function App() {
   const alavCapSac=calcCapitalAlavancado(alavCapitalTotal,alavEntrada,alavRInvestM,alavSac.rows.map(r=>r.installment),alavHorizonte,0,null);
   const alavCapPrice=calcCapitalAlavancado(alavCapitalTotal,alavEntrada,alavRInvestM,alavPrice.rows.map(r=>r.installment),alavHorizonte,0,null);
   const alavCapCons=calcCapitalAlavancado(alavCapitalTotal,0,alavRInvestM,alavCons.rows.map(r=>r.installment),alavHorizonte,act.lanceEfetivo||0,alavCmSafe);
+  // "à vista": grupo de controle sem alavancagem nenhuma — paga o bem inteiro
+  // agora, e o que sobrar do capital total fica só aplicado, sem mais nenhum
+  // desconto (não há parcela nem lance). É a referência para saber se vale a
+  // pena alavancar (financiamento OU consórcio) em vez de simplesmente comprar.
+  const alavCapAvista=calcCapitalAlavancado(alavCapitalTotal,alavValorBem,alavRInvestM,[],alavHorizonte,0,null);
   const alavSaldoSacFinal=alavSac.rows[alavHorizonte-1]?.bal??0;
   const alavSaldoPriceFinal=alavPrice.rows[alavHorizonte-1]?.bal??0;
   // consórcio é um pool que se autoamortiza: no fim do próprio prazo (que nunca
   // passa de alavHorizonte, por construção) a dívida do grupo já está quitada.
   const alavSaldoConsFinal=0;
   const itensAlav=[
+    {label:"À vista",color:C.avista,desembolso:alavValorBem,capitalFinal:alavCapAvista.final,mesInsuficiente:alavCapAvista.mesInsuficiente,aporteRendaTotal:alavCapAvista.aporteRendaTotal,saldoDevedor:0,valorAtivo:alavValorBem,patrimonioTotal:alavValorBem+alavCapAvista.final,capRows:alavCapAvista.rows},
     {label:"SAC",color:C.sac,desembolso:alavEntrada,capitalFinal:alavCapSac.final,mesInsuficiente:alavCapSac.mesInsuficiente,aporteRendaTotal:alavCapSac.aporteRendaTotal,saldoDevedor:alavSaldoSacFinal,valorAtivo:Math.max(alavValorBem-alavSaldoSacFinal,0),patrimonioTotal:Math.max(alavValorBem-alavSaldoSacFinal,0)+alavCapSac.final,capRows:alavCapSac.rows},
     {label:"Price",color:C.price,desembolso:alavEntrada,capitalFinal:alavCapPrice.final,mesInsuficiente:alavCapPrice.mesInsuficiente,aporteRendaTotal:alavCapPrice.aporteRendaTotal,saldoDevedor:alavSaldoPriceFinal,valorAtivo:Math.max(alavValorBem-alavSaldoPriceFinal,0),patrimonioTotal:Math.max(alavValorBem-alavSaldoPriceFinal,0)+alavCapPrice.final,capRows:alavCapPrice.rows},
     {label:"Consórcio",color:C.cons,desembolso:act.lanceEfetivo||0,capitalFinal:alavCapCons.final,mesInsuficiente:alavCapCons.mesInsuficiente,aporteRendaTotal:alavCapCons.aporteRendaTotal,saldoDevedor:alavSaldoConsFinal,valorAtivo:Math.max((act.cartaTravada||0)-alavSaldoConsFinal,0),patrimonioTotal:Math.max((act.cartaTravada||0)-alavSaldoConsFinal,0)+alavCapCons.final,capRows:alavCapCons.rows},
@@ -1734,7 +1744,7 @@ export default function App() {
         {/* NOTA ALAVANCAGEM */}
         <div style={{background:"rgba(251,191,36,0.07)",border:"1px solid rgba(251,191,36,0.2)",borderRadius:10,padding:"12px 16px",fontSize:11,color:C.muted,lineHeight:1.7}}>
           <span style={{color:"#fbbf24",fontWeight:600}}>// premissas · </span>
-          Modo dedicado à tese de "alavancagem de consórcio": usar menos capital no lance e manter o restante investido. Os campos aqui são independentes dos modos Imóvel e Veículo — ajuste-os para representar o seu cenário. Para simular um veículo, deixe a TR anual em 0% (CDC de veículo não tem TR — é SAC/Price puro); SAC não é praticado comercialmente em financiamento de veículo, mas o simulador calcula do mesmo jeito caso queira comparar. A parcela mensal de cada modalidade é descontada do rendimento do capital investido. A comparação roda até o fim do prazo mais longo entre as modalidades (não para na contemplação) — o capital de quem já quitou continua rendendo até lá, e o consórcio aplica o lance no mês da contemplação e é tratado como quitado ao final do próprio prazo. Quando o rendimento não cobre a parcela, o capital investido para em zero (não vira dívida rendendo a mesma taxa) e a diferença é contabilizada como "aporte de renda" — dinheiro que sairia do seu orçamento mensal normal, e não de um empréstimo. O mês de contemplação é uma estimativa, sem garantia de data. Conteúdo educacional — não constitui recomendação de investimento.
+          Modo dedicado à tese de "alavancagem de consórcio": usar menos capital no lance e manter o restante investido. "À vista" é o grupo de controle sem alavancagem — o mesmo capital total, pagando o bem inteiro agora e sem parcela nenhuma depois; é contra ela que faz mais sentido julgar se financiar ou fazer consórcio com lance parcial realmente compensa. Os campos aqui são independentes dos modos Imóvel e Veículo — ajuste-os para representar o seu cenário. Para simular um veículo, deixe a TR anual em 0% (CDC de veículo não tem TR — é SAC/Price puro); SAC não é praticado comercialmente em financiamento de veículo, mas o simulador calcula do mesmo jeito caso queira comparar. A parcela mensal de cada modalidade é descontada do rendimento do capital investido. A comparação roda até o fim do prazo mais longo entre as modalidades (não para na contemplação) — o capital de quem já quitou continua rendendo até lá, e o consórcio aplica o lance no mês da contemplação e é tratado como quitado ao final do próprio prazo. Quando o rendimento não cobre a parcela, o capital investido para em zero (não vira dívida rendendo a mesma taxa) e a diferença é contabilizada como "aporte de renda" — dinheiro que sairia do seu orçamento mensal normal, e não de um empréstimo. O mês de contemplação é uma estimativa, sem garantia de data. Conteúdo educacional — não constitui recomendação de investimento.
         </div>
         </>)}
       </div>
