@@ -1335,6 +1335,29 @@ export default function App() {
     {label:"Price",color:C.price,desembolso:alavEntrada,capitalFinal:alavCapPrice.final,mesInsuficiente:alavCapPrice.mesInsuficiente,aporteRendaTotal:alavCapPrice.aporteRendaTotal,saldoDevedor:alavSaldoPriceFinal,valorAtivo:Math.max(alavValorBem-alavSaldoPriceFinal,0),patrimonioTotal:Math.max(alavValorBem-alavSaldoPriceFinal,0)+alavCapPrice.final-alavCapPrice.aporteRendaTotal,capRows:alavCapPrice.rows},
     {label:"Consórcio",color:C.cons,desembolso:act.lanceEfetivo||0,capitalFinal:alavCapCons.final,mesInsuficiente:alavCapCons.mesInsuficiente,aporteRendaTotal:alavCapCons.aporteRendaTotal,saldoDevedor:alavSaldoConsFinal,valorAtivo:Math.max((act.cartaTravada||0)-alavSaldoConsFinal,0),patrimonioTotal:Math.max((act.cartaTravada||0)-alavSaldoConsFinal,0)+alavCapCons.final-alavCapCons.aporteRendaTotal,capRows:alavCapCons.rows},
   ];
+  // ── sensibilidade ao mês da contemplação ────────────────────────────────
+  // Você não escolhe o mês em que é sorteado/contemplado — é um fator de sorte,
+  // não uma alavanca sob seu controle. Aqui simulamos o consórcio para vários
+  // meses de contemplação possíveis (mantendo todos os outros parâmetros
+  // fixos), pra deixar visível o quanto o resultado depende disso — em vez de
+  // fixar um único mês favorável e vender aquele número como "o" resultado.
+  const alavSensibilidade=useMemo(()=>{
+    const prazoSafe=Math.max(Number(alavPrazoCons)||1,1);
+    const nPontos=Math.min(16,prazoSafe);
+    const mesesSet=new Set();
+    for(let i=1;i<=nPontos;i++) mesesSet.add(Math.max(1,Math.round(i*prazoSafe/nPontos)));
+    mesesSet.add(alavCmSafe); // garante que o mês configurado no painel aparece no gráfico
+    const meses=[...mesesSet].sort((a,b)=>a-b);
+    return meses.map(cm=>{
+      const consCm=calcConsorcio(alavCarta,prazoSafe,alavAdmin/100,alavFundo/100,alavIdxM,cm,alavLance,0,0);
+      const tCm=consCm.totals;
+      const capCm=calcCapitalAlavancado(alavCapitalTotal,0,alavRInvestM,consCm.rows.map(r=>r.installment),alavHorizonte,tCm.lanceEfetivo||0,cm);
+      const valorAtivoCm=Math.max(tCm.cartaTravada||0,0); // saldo devedor final = 0, autoamortizado
+      const patrimonioCm=valorAtivoCm+capCm.final-capCm.aporteRendaTotal;
+      return {mes:cm,Consórcio:patrimonioCm};
+    });
+  },[alavCarta,alavPrazoCons,alavAdmin,alavFundo,alavIdxM,alavLance,alavCapitalTotal,alavRInvestM,alavHorizonte,alavCmSafe]);
+  const alavPatAplic=itensAlav[0].patrimonioTotal,alavPatSac=itensAlav[1].patrimonioTotal,alavPatPrice=itensAlav[2].patrimonioTotal;
   const sacTotal=(st.totalPaid||0)+entrada+fgts;
   const priceTotal=(pt.totalPaid||0)+entrada+fgts;
   const consTotal=(ct.totalPaid||0)+aluguelTotal;
@@ -1747,6 +1770,27 @@ export default function App() {
         <SectionTag>patrimônio total ao final do prazo</SectionTag>
         <AlavancagemPanel capitalTotal={alavCapitalTotal} onCapitalChange={setAlavCapitalTotal} taxaRend={alavRendCapital} onTaxaChange={setAlavRendCapital} cmSafe={alavCmSafe} horizonte={alavHorizonte} itens={itensAlav} bemLabel="bem"/>
         <FluxoCapitalDetalhado itens={itensAlav} cmSafe={alavCmSafe} horizonte={alavHorizonte}/>
+        {/* SENSIBILIDADE AO MÊS DA CONTEMPLAÇÃO */}
+        <SectionTag>sensibilidade ao mês da contemplação</SectionTag>
+        <ChartCard title="Patrimônio total do consórcio, por mês de contemplação" subtitle={`Cada ponto simula o consórcio sendo contemplado em um mês diferente (mantendo os demais parâmetros fixos), comparado ao patrimônio de Aplicação pura, SAC e Price — que não dependem do mês da contemplação. O ponto ★ é o mês ${alavCmSafe} configurado acima. Isso mostra o quanto o resultado do consórcio depende de um fator de sorte que você não controla.`}>
+          <ResponsiveContainer>
+            <LineChart data={alavSensibilidade}>
+              <CartesianGrid strokeDasharray="3 3" stroke={C.border}/>
+              <XAxis dataKey="mes" tick={{fontSize:10,fontFamily:F.body,fill:C.muted}} label={{value:"mês da contemplação",position:"insideBottom",offset:-4,fontSize:10,fill:C.muted,fontFamily:F.body}}/>
+              <YAxis tickFormatter={v=>`${(v/1000).toFixed(0)}k`} tick={{fontSize:10,fontFamily:F.body,fill:C.muted}}/>
+              <Tooltip content={<CustomTooltip/>}/>
+              <Legend/>
+              <ReferenceLine y={alavPatAplic} stroke={C.aplic} strokeDasharray="4 3" label={{value:"Aplicação pura",position:"insideTopLeft",fontSize:10,fill:C.aplic,fontFamily:F.body}}/>
+              <ReferenceLine y={alavPatSac} stroke={C.sac} strokeDasharray="4 3" label={{value:"SAC",position:"insideBottomLeft",fontSize:10,fill:C.sac,fontFamily:F.body}}/>
+              <ReferenceLine y={alavPatPrice} stroke={C.price} strokeDasharray="4 3" label={{value:"Price",position:"insideTopLeft",fontSize:10,fill:C.price,fontFamily:F.body}}/>
+              <ReferenceLine x={alavCmSafe} stroke={C.accent} strokeDasharray="2 2" label={{value:"★ seu cenário",position:"top",fontSize:10,fill:C.accent,fontFamily:F.body}}/>
+              <Line type="monotone" dataKey="Consórcio" name="Consórcio" stroke={C.cons} strokeWidth={2} dot={{r:3}}/>
+            </LineChart>
+          </ResponsiveContainer>
+        </ChartCard>
+        <div style={{fontSize:11,color:C.muted,fontFamily:F.body,lineHeight:1.6,marginBottom:16,marginTop:-4}}>
+          Repare que Aplicação pura, SAC e Price aparecem como linhas retas: nenhuma delas depende de quando você seria contemplado, porque nenhuma envolve sorteio. Só o Consórcio varia — e pode ficar tanto acima quanto abaixo das outras modalidades dependendo do mês em que a sorte (ou o lance) te contemplar.
+        </div>
         {/* NOTA ALAVANCAGEM */}
         <div style={{background:"rgba(251,191,36,0.07)",border:"1px solid rgba(251,191,36,0.2)",borderRadius:10,padding:"12px 16px",fontSize:11,color:C.muted,lineHeight:1.7}}>
           <span style={{color:"#fbbf24",fontWeight:600}}>// premissas · </span>
