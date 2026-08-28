@@ -275,11 +275,15 @@ function calcCapitalAlavancado(capitalTotal,desembolsoMes0,rInvestM,parcelasPorM
   let mesInsuficiente=null;
   const rows=[];
   for(let m=1;m<=meses;m++){
-    bal=bal*(1+rInvestM);
-    bal-=(parcelasPorMes[m-1]||0);
-    if(desembolsoExtra>0&&m===mesDesembolsoExtra) bal-=desembolsoExtra;
+    const balInicio=bal;
+    const rendimento=bal*rInvestM;
+    bal+=rendimento;
+    const parcela=parcelasPorMes[m-1]||0;
+    bal-=parcela;
+    const lanceAplicado=(desembolsoExtra>0&&m===mesDesembolsoExtra)?desembolsoExtra:0;
+    if(lanceAplicado>0) bal-=lanceAplicado;
     if(bal<0&&mesInsuficiente===null) mesInsuficiente=m;
-    rows.push({month:m,bal});
+    rows.push({month:m,balInicio,rendimento,parcela,lanceAplicado,bal});
   }
   return {rows,final:bal,mesInsuficiente};
 }
@@ -1104,6 +1108,83 @@ function AlavancagemPanel({capitalTotal,onCapitalChange,taxaRend,onTaxaChange,cm
     </div>
   );
 }
+// ─── ALAVANCAGEM: FLUXO DO CAPITAL INVESTIDO MÊS A MÊS ────────────────────────
+// Abre, para cada modalidade, o que o AlavancagemPanel só mostra no total: como
+// o capital que sobrou rende todo mês e é consumido pela parcela (e, no caso do
+// consórcio, pelo lance na contemplação), até o resultado final.
+function FluxoCapitalDetalhado({itens,cmSafe}) {
+  const [open,setOpen]=useState(false);
+  const [aba,setAba]=useState(itens[0]?.label);
+  const [modo,setModo]=useState("anual");
+  const thS={padding:"8px 12px",fontSize:10,fontWeight:600,textAlign:"center",color:C.muted,borderBottom:`1px solid ${C.border}`,background:C.panel2,fontFamily:F.body,textTransform:"uppercase",letterSpacing:"0.07em",whiteSpace:"nowrap"};
+  const tdC=(bold,color)=>({padding:"7px 12px",fontSize:12,textAlign:"right",borderBottom:`1px solid ${C.border}`,fontFamily:F.body,fontWeight:bold?600:400,color:color||C.text,whiteSpace:"nowrap"});
+  const tdL={padding:"7px 12px",fontSize:12,textAlign:"center",borderBottom:`1px solid ${C.border}`,fontFamily:F.body,color:C.muted,whiteSpace:"nowrap"};
+  const item=itens.find(i=>i.label===aba)||itens[0];
+  const rows=item?.capRows||[];
+  const filterRows=(rs)=>modo==="anual"?rs.filter(r=>r.month%12===0||r.month===1||r.month===cmSafe||r.month===rs.length):rs;
+  const rowsFiltradas=filterRows(rows);
+  return (
+    <div style={{background:C.panel,border:`1px solid ${C.border}`,borderRadius:10,marginBottom:12,overflow:"hidden"}}>
+      <button onClick={()=>setOpen(o=>!o)} style={{width:"100%",background:"none",border:"none",padding:"14px 20px",display:"flex",alignItems:"center",justifyContent:"space-between",fontFamily:F.body}}>
+        <div style={{display:"flex",alignItems:"center",gap:10,flexWrap:"wrap"}}>
+          <span style={{fontSize:13,fontWeight:600,color:C.text}}>//</span>
+          <span style={{fontSize:13,fontWeight:600,color:C.text}}>Fluxo do capital investido, mês a mês</span>
+          <span style={{fontSize:11,color:C.muted}}>Rendimento − parcela (− lance na contemplação) = capital que sobra</span>
+        </div>
+        <span style={{fontSize:16,color:C.muted,transition:"transform 0.2s",transform:open?"rotate(180deg)":"rotate(0deg)"}}>▾</span>
+      </button>
+      {open&&(
+        <div>
+          <div style={{padding:"0 20px 12px",display:"flex",alignItems:"center",justifyContent:"space-between",flexWrap:"wrap",gap:8,borderBottom:`1px solid ${C.border}`}}>
+            <div style={{display:"flex",gap:6}}>
+              {itens.map(it=>(
+                <button key={it.label} onClick={()=>setAba(it.label)} style={{padding:"5px 14px",borderRadius:6,border:`1px solid ${aba===it.label?it.color:C.border}`,background:aba===it.label?C.accentHl:"transparent",color:aba===it.label?it.color:C.muted,fontFamily:F.body,fontSize:11,fontWeight:600,transition:"all 0.15s"}}>
+                  {it.label}
+                </button>
+              ))}
+            </div>
+            <div style={{display:"flex",gap:6}}>
+              {["anual","mensal"].map(m=>(
+                <button key={m} onClick={()=>setModo(m)} style={{padding:"5px 12px",borderRadius:6,border:`1px solid ${modo===m?C.accent:C.border}`,background:modo===m?C.accentBg:"transparent",color:modo===m?C.accent:C.muted,fontFamily:F.body,fontSize:11,fontWeight:600,transition:"all 0.15s"}}>
+                  {m==="anual"?"A cada 12 meses":"Mensal"}
+                </button>
+              ))}
+            </div>
+          </div>
+          <div style={{overflowX:"auto",maxHeight:400,overflowY:"auto"}}>
+            <table cellPadding="0" style={{borderCollapse:"separate",borderSpacing:0,width:"100%",minWidth:560}}>
+              <thead style={{position:"sticky",top:0,zIndex:2}}>
+                <tr>
+                  <th style={{...thS,textAlign:"center"}}>Mês</th>
+                  <th style={thS}>Capital no início do mês</th>
+                  <th style={{...thS,color:C.accent}}>Rendimento</th>
+                  <th style={{...thS,color:item?.color}}>Parcela paga</th>
+                  <th style={{...thS,color:"#f87171"}}>Lance na contemplação</th>
+                  <th style={thS}>Capital no fim do mês</th>
+                </tr>
+              </thead>
+              <tbody>
+                {rowsFiltradas.map((r,i)=>(
+                  <tr key={r.month} style={{background:r.month===cmSafe?C.accentBg:i%2===0?C.panel:C.panel2}}>
+                    <td style={{...tdL,color:r.month===cmSafe?C.accent:C.muted,fontWeight:r.month===cmSafe?700:400}}>{r.month}{r.month===cmSafe?" ★":""}</td>
+                    <td style={tdC(false,r.balInicio<0?"#f87171":C.text)}>{brl(r.balInicio)}</td>
+                    <td style={tdC(false,C.accent)}>{brl(r.rendimento)}</td>
+                    <td style={tdC(true,item?.color)}>{brl(r.parcela)}</td>
+                    <td style={tdC(r.lanceAplicado>0,r.lanceAplicado>0?"#f87171":C.borderMid)}>{r.lanceAplicado>0?brl(r.lanceAplicado):"—"}</td>
+                    <td style={tdC(true,r.bal<0?"#f87171":C.text)}>{brl(r.bal)}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+          <div style={{padding:"10px 20px",fontSize:11,color:C.muted,fontFamily:F.body}}>
+            ★ = mês {cmSafe}, quando o consórcio contemplaria — é o horizonte usado na comparação de patrimônio total.
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
 // ─── APP ──────────────────────────────────────────────────────────────────────
 export default function App() {
   const [modo,setModo]=useState("imovel");
@@ -1195,17 +1276,21 @@ export default function App() {
   const alavIdxM=useMemo(()=>annualToMonthly(alavIdx),[alavIdx]);
   const alavCmSafe=Math.min(Math.max(Number(alavCmMes)||1,1),Math.max(Number(alavPrazoCons)||1,1));
   const alavPrincipal=Math.max(alavValorBem-alavEntrada,0);
-  const alavFin=useMemo(()=>calcPrice(alavPrincipal,alavRM,alavTRM,alavPrazoFin),[alavPrincipal,alavRM,alavTRM,alavPrazoFin]);
+  const alavSac=useMemo(()=>calcSac(alavPrincipal,alavRM,alavTRM,alavPrazoFin),[alavPrincipal,alavRM,alavTRM,alavPrazoFin]);
+  const alavPrice=useMemo(()=>calcPrice(alavPrincipal,alavRM,alavTRM,alavPrazoFin),[alavPrincipal,alavRM,alavTRM,alavPrazoFin]);
   const alavCons=useMemo(()=>calcConsorcio(alavCarta,alavPrazoCons,alavAdmin/100,alavFundo/100,alavIdxM,alavCmSafe,alavLance,0,0),[alavCarta,alavPrazoCons,alavAdmin,alavFundo,alavIdxM,alavCmSafe,alavLance]);
-  const aft=alavFin.totals,act=alavCons.totals;
+  const ast=alavSac.totals,apt=alavPrice.totals,act=alavCons.totals;
   const alavRInvestM=annualToMonthly(alavRendCapital);
-  const alavCapFin=calcCapitalAlavancado(alavCapitalTotal,alavEntrada,alavRInvestM,alavFin.rows.map(r=>r.installment),alavCmSafe,0,null);
+  const alavCapSac=calcCapitalAlavancado(alavCapitalTotal,alavEntrada,alavRInvestM,alavSac.rows.map(r=>r.installment),alavCmSafe,0,null);
+  const alavCapPrice=calcCapitalAlavancado(alavCapitalTotal,alavEntrada,alavRInvestM,alavPrice.rows.map(r=>r.installment),alavCmSafe,0,null);
   const alavCapCons=calcCapitalAlavancado(alavCapitalTotal,0,alavRInvestM,alavCons.rows.map(r=>r.installment),alavCmSafe,act.lanceEfetivo||0,alavCmSafe);
-  const alavSaldoFinCm=alavFin.rows[alavCmSafe-1]?.bal??0;
+  const alavSaldoSacCm=alavSac.rows[alavCmSafe-1]?.bal??0;
+  const alavSaldoPriceCm=alavPrice.rows[alavCmSafe-1]?.bal??0;
   const alavSaldoPosConsCm=act.saldoPos??0;
   const itensAlav=[
-    {label:"Financiamento",color:C.sac,desembolso:alavEntrada,capitalFinal:alavCapFin.final,mesInsuficiente:alavCapFin.mesInsuficiente,saldoDevedor:alavSaldoFinCm,valorAtivo:Math.max(alavValorBem-alavSaldoFinCm,0),patrimonioTotal:Math.max(alavValorBem-alavSaldoFinCm,0)+alavCapFin.final},
-    {label:"Consórcio",color:C.cons,desembolso:act.lanceEfetivo||0,capitalFinal:alavCapCons.final,mesInsuficiente:alavCapCons.mesInsuficiente,saldoDevedor:alavSaldoPosConsCm,valorAtivo:Math.max((act.cartaTravada||0)-alavSaldoPosConsCm,0),patrimonioTotal:Math.max((act.cartaTravada||0)-alavSaldoPosConsCm,0)+alavCapCons.final},
+    {label:"SAC",color:C.sac,desembolso:alavEntrada,capitalFinal:alavCapSac.final,mesInsuficiente:alavCapSac.mesInsuficiente,saldoDevedor:alavSaldoSacCm,valorAtivo:Math.max(alavValorBem-alavSaldoSacCm,0),patrimonioTotal:Math.max(alavValorBem-alavSaldoSacCm,0)+alavCapSac.final,capRows:alavCapSac.rows},
+    {label:"Price",color:C.price,desembolso:alavEntrada,capitalFinal:alavCapPrice.final,mesInsuficiente:alavCapPrice.mesInsuficiente,saldoDevedor:alavSaldoPriceCm,valorAtivo:Math.max(alavValorBem-alavSaldoPriceCm,0),patrimonioTotal:Math.max(alavValorBem-alavSaldoPriceCm,0)+alavCapPrice.final,capRows:alavCapPrice.rows},
+    {label:"Consórcio",color:C.cons,desembolso:act.lanceEfetivo||0,capitalFinal:alavCapCons.final,mesInsuficiente:alavCapCons.mesInsuficiente,saldoDevedor:alavSaldoPosConsCm,valorAtivo:Math.max((act.cartaTravada||0)-alavSaldoPosConsCm,0),patrimonioTotal:Math.max((act.cartaTravada||0)-alavSaldoPosConsCm,0)+alavCapCons.final,capRows:alavCapCons.rows},
   ];
   const sacTotal=(st.totalPaid||0)+entrada+fgts;
   const priceTotal=(pt.totalPaid||0)+entrada+fgts;
@@ -1598,7 +1683,7 @@ export default function App() {
         {/* INPUTS ALAVANCAGEM */}
         <SectionTag>parâmetros da simulação</SectionTag>
         <div className="sim-inputs" style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:12,marginBottom:20}}>
-          <InputPanel accentColor={C.sac} label="financiamento (tabela price)">
+          <InputPanel accentColor={C.sac} label="financiamento — SAC e Price">
             <InputMoney label="Valor do bem"      value={alavValorBem} onChange={setAlavValorBem}/>
             <InputMoney label="Entrada"           value={alavEntrada}  onChange={setAlavEntrada}/>
             <InputPct   label="CET anual"         value={alavCET}      onChange={setAlavCET} hint="Inclui juros, seguros e taxas"/>
@@ -1618,10 +1703,11 @@ export default function App() {
         {/* PAINEL DE CAPITAL / RESULTADO */}
         <SectionTag>patrimônio total no mês da contemplação</SectionTag>
         <AlavancagemPanel capitalTotal={alavCapitalTotal} onCapitalChange={setAlavCapitalTotal} taxaRend={alavRendCapital} onTaxaChange={setAlavRendCapital} cmSafe={alavCmSafe} itens={itensAlav} bemLabel="bem"/>
+        <FluxoCapitalDetalhado itens={itensAlav} cmSafe={alavCmSafe}/>
         {/* NOTA ALAVANCAGEM */}
         <div style={{background:"rgba(251,191,36,0.07)",border:"1px solid rgba(251,191,36,0.2)",borderRadius:10,padding:"12px 16px",fontSize:11,color:C.muted,lineHeight:1.7}}>
           <span style={{color:"#fbbf24",fontWeight:600}}>// premissas · </span>
-          Modo dedicado à tese de "alavancagem de consórcio": usar menos capital no lance e manter o restante investido. Os campos aqui são independentes dos modos Imóvel e Veículo — ajuste-os para representar o seu cenário (ex: TR 0% e prazo mais curto para simular um veículo). A parcela mensal de cada modalidade é descontada do rendimento do capital investido (cenário conservador — não pressupõe renda extra disponível). Quando o capital investido fica negativo, ele seria "coberto" à mesma taxa de rendimento informada, o que é otimista frente ao custo real de crédito emergencial. O mês de contemplação é uma estimativa, sem garantia de data. Conteúdo educacional — não constitui recomendação de investimento.
+          Modo dedicado à tese de "alavancagem de consórcio": usar menos capital no lance e manter o restante investido. Os campos aqui são independentes dos modos Imóvel e Veículo — ajuste-os para representar o seu cenário. Para simular um veículo, deixe a TR anual em 0% (CDC de veículo não tem TR — é SAC/Price puro); SAC não é praticado comercialmente em financiamento de veículo, mas o simulador calcula do mesmo jeito caso queira comparar. A parcela mensal de cada modalidade é descontada do rendimento do capital investido (cenário conservador — não pressupõe renda extra disponível). Quando o capital investido fica negativo, ele seria "coberto" à mesma taxa de rendimento informada, o que é otimista frente ao custo real de crédito emergencial. O mês de contemplação é uma estimativa, sem garantia de data. Conteúdo educacional — não constitui recomendação de investimento.
         </div>
         </>)}
       </div>
