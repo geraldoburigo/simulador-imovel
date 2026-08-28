@@ -1046,11 +1046,13 @@ function CustosDetalhadosVeiculo({ft,vct,finTotal,consTotal,principal,entrada,io
   );
 }
 // ─── CUSTO DE OPORTUNIDADE / ALAVANCAGEM ──────────────────────────────────────
-// Compara, no mês da contemplação do consórcio, o patrimônio líquido total de
-// cada modalidade: (valor do bem − saldo devedor naquele mês) + o que sobrou do
-// capital total disponível, ainda investido (rendendo, descontada a parcela
-// mensal de cada modalidade — ver calcCapitalAlavancado).
-function AlavancagemPanel({capitalTotal,onCapitalChange,taxaRend,onTaxaChange,cmSafe,itens,bemLabel}) {
+// Compara, ao final do prazo mais longo entre as modalidades, o patrimônio
+// líquido total de cada uma: (valor do bem − saldo devedor nesse mês) + o que
+// sobrou do capital total disponível, ainda investido (rendendo, descontada a
+// parcela mensal de cada modalidade — ver calcCapitalAlavancado). O consórcio
+// aplica o lance no mês da contemplação (cmSafe), mas o capital de todas
+// continua rendendo/sendo consumido até o horizonte comum.
+function AlavancagemPanel({capitalTotal,onCapitalChange,taxaRend,onTaxaChange,cmSafe,horizonte,itens,bemLabel}) {
   const thS={padding:"9px 12px",fontSize:10,fontWeight:600,textAlign:"center",color:C.muted,borderBottom:`1px solid ${C.border}`,background:C.panel2,fontFamily:F.body,textTransform:"uppercase",letterSpacing:"0.06em",whiteSpace:"nowrap"};
   const tdL={padding:"9px 12px",fontSize:12,color:C.text,borderBottom:`1px solid ${C.border}`,fontFamily:F.body};
   const tdC=(bold,color,hl)=>({padding:"9px 12px",fontSize:12,textAlign:"center",borderBottom:`1px solid ${C.border}`,fontFamily:F.body,fontWeight:bold?700:400,color:color||C.text,background:hl?C.accentHl:"transparent",whiteSpace:"nowrap"});
@@ -1064,7 +1066,7 @@ function AlavancagemPanel({capitalTotal,onCapitalChange,taxaRend,onTaxaChange,cm
       </div>
       <div style={{padding:20}}>
         <div style={{fontSize:11,color:C.muted,fontFamily:F.body,lineHeight:1.6,marginBottom:16}}>
-          Simula usar só o valor de entrada/lance de cada modalidade e manter o restante do seu capital investido, rendendo à taxa abaixo — com a parcela mensal descontada desse rendimento. Compara o patrimônio total (bem − dívida + capital que sobrou) no mês {cmSafe}, quando o consórcio contemplaria.
+          Simula usar só o valor de entrada/lance de cada modalidade e manter o restante do seu capital investido, rendendo à taxa abaixo — com a parcela mensal descontada desse rendimento. O consórcio aplica o lance no mês {cmSafe}, quando contemplaria; as demais seguem pagando parcela normalmente. Compara o patrimônio total (bem − dívida + capital que sobrou) no mês {horizonte}, final do prazo mais longo entre as modalidades.
         </div>
         <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:12,marginBottom:18}}>
           <InputMoney label="Capital total disponível" value={capitalTotal} onChange={onCapitalChange} hint="Quanto você tem em caixa hoje para essa decisão"/>
@@ -1076,8 +1078,8 @@ function AlavancagemPanel({capitalTotal,onCapitalChange,taxaRend,onTaxaChange,cm
               <tr>
                 <th style={{...thS,textAlign:"left"}}>Modalidade</th>
                 <th style={thS}>Desembolso imediato</th>
-                <th style={thS}>Capital ainda investido (mês {cmSafe})</th>
-                <th style={thS}>Saldo devedor (mês {cmSafe})</th>
+                <th style={thS}>Capital ainda investido (mês {horizonte})</th>
+                <th style={thS}>Saldo devedor (mês {horizonte})</th>
                 <th style={thS}>Patrimônio do {bemLabel}</th>
                 <th style={thS}>Patrimônio total</th>
               </tr>
@@ -1112,7 +1114,7 @@ function AlavancagemPanel({capitalTotal,onCapitalChange,taxaRend,onTaxaChange,cm
 // Abre, para cada modalidade, o que o AlavancagemPanel só mostra no total: como
 // o capital que sobrou rende todo mês e é consumido pela parcela (e, no caso do
 // consórcio, pelo lance na contemplação), até o resultado final.
-function FluxoCapitalDetalhado({itens,cmSafe}) {
+function FluxoCapitalDetalhado({itens,cmSafe,horizonte}) {
   const [open,setOpen]=useState(false);
   const [aba,setAba]=useState(itens[0]?.label);
   const [modo,setModo]=useState("anual");
@@ -1178,7 +1180,7 @@ function FluxoCapitalDetalhado({itens,cmSafe}) {
             </table>
           </div>
           <div style={{padding:"10px 20px",fontSize:11,color:C.muted,fontFamily:F.body}}>
-            ★ = mês {cmSafe}, quando o consórcio contemplaria — é o horizonte usado na comparação de patrimônio total.
+            ★ = mês {cmSafe}, quando o consórcio contemplaria (aplica o lance ali). A tabela segue até o mês {horizonte}, final do prazo mais longo entre as modalidades — é o horizonte usado na comparação de patrimônio total.
           </div>
         </div>
       )}
@@ -1281,16 +1283,22 @@ export default function App() {
   const alavCons=useMemo(()=>calcConsorcio(alavCarta,alavPrazoCons,alavAdmin/100,alavFundo/100,alavIdxM,alavCmSafe,alavLance,0,0),[alavCarta,alavPrazoCons,alavAdmin,alavFundo,alavIdxM,alavCmSafe,alavLance]);
   const ast=alavSac.totals,apt=alavPrice.totals,act=alavCons.totals;
   const alavRInvestM=annualToMonthly(alavRendCapital);
-  const alavCapSac=calcCapitalAlavancado(alavCapitalTotal,alavEntrada,alavRInvestM,alavSac.rows.map(r=>r.installment),alavCmSafe,0,null);
-  const alavCapPrice=calcCapitalAlavancado(alavCapitalTotal,alavEntrada,alavRInvestM,alavPrice.rows.map(r=>r.installment),alavCmSafe,0,null);
-  const alavCapCons=calcCapitalAlavancado(alavCapitalTotal,0,alavRInvestM,alavCons.rows.map(r=>r.installment),alavCmSafe,act.lanceEfetivo||0,alavCmSafe);
-  const alavSaldoSacCm=alavSac.rows[alavCmSafe-1]?.bal??0;
-  const alavSaldoPriceCm=alavPrice.rows[alavCmSafe-1]?.bal??0;
-  const alavSaldoPosConsCm=act.saldoPos??0;
+  // horizonte comum de comparação: vai até o fim do prazo mais longo entre as
+  // modalidades, não só até a contemplação — o capital de quem já quitou segue
+  // rendendo (ou sendo consumido) até esse ponto.
+  const alavHorizonte=Math.max(Number(alavPrazoFin)||1,Number(alavPrazoCons)||1);
+  const alavCapSac=calcCapitalAlavancado(alavCapitalTotal,alavEntrada,alavRInvestM,alavSac.rows.map(r=>r.installment),alavHorizonte,0,null);
+  const alavCapPrice=calcCapitalAlavancado(alavCapitalTotal,alavEntrada,alavRInvestM,alavPrice.rows.map(r=>r.installment),alavHorizonte,0,null);
+  const alavCapCons=calcCapitalAlavancado(alavCapitalTotal,0,alavRInvestM,alavCons.rows.map(r=>r.installment),alavHorizonte,act.lanceEfetivo||0,alavCmSafe);
+  const alavSaldoSacFinal=alavSac.rows[alavHorizonte-1]?.bal??0;
+  const alavSaldoPriceFinal=alavPrice.rows[alavHorizonte-1]?.bal??0;
+  // consórcio é um pool que se autoamortiza: no fim do próprio prazo (que nunca
+  // passa de alavHorizonte, por construção) a dívida do grupo já está quitada.
+  const alavSaldoConsFinal=0;
   const itensAlav=[
-    {label:"SAC",color:C.sac,desembolso:alavEntrada,capitalFinal:alavCapSac.final,mesInsuficiente:alavCapSac.mesInsuficiente,saldoDevedor:alavSaldoSacCm,valorAtivo:Math.max(alavValorBem-alavSaldoSacCm,0),patrimonioTotal:Math.max(alavValorBem-alavSaldoSacCm,0)+alavCapSac.final,capRows:alavCapSac.rows},
-    {label:"Price",color:C.price,desembolso:alavEntrada,capitalFinal:alavCapPrice.final,mesInsuficiente:alavCapPrice.mesInsuficiente,saldoDevedor:alavSaldoPriceCm,valorAtivo:Math.max(alavValorBem-alavSaldoPriceCm,0),patrimonioTotal:Math.max(alavValorBem-alavSaldoPriceCm,0)+alavCapPrice.final,capRows:alavCapPrice.rows},
-    {label:"Consórcio",color:C.cons,desembolso:act.lanceEfetivo||0,capitalFinal:alavCapCons.final,mesInsuficiente:alavCapCons.mesInsuficiente,saldoDevedor:alavSaldoPosConsCm,valorAtivo:Math.max((act.cartaTravada||0)-alavSaldoPosConsCm,0),patrimonioTotal:Math.max((act.cartaTravada||0)-alavSaldoPosConsCm,0)+alavCapCons.final,capRows:alavCapCons.rows},
+    {label:"SAC",color:C.sac,desembolso:alavEntrada,capitalFinal:alavCapSac.final,mesInsuficiente:alavCapSac.mesInsuficiente,saldoDevedor:alavSaldoSacFinal,valorAtivo:Math.max(alavValorBem-alavSaldoSacFinal,0),patrimonioTotal:Math.max(alavValorBem-alavSaldoSacFinal,0)+alavCapSac.final,capRows:alavCapSac.rows},
+    {label:"Price",color:C.price,desembolso:alavEntrada,capitalFinal:alavCapPrice.final,mesInsuficiente:alavCapPrice.mesInsuficiente,saldoDevedor:alavSaldoPriceFinal,valorAtivo:Math.max(alavValorBem-alavSaldoPriceFinal,0),patrimonioTotal:Math.max(alavValorBem-alavSaldoPriceFinal,0)+alavCapPrice.final,capRows:alavCapPrice.rows},
+    {label:"Consórcio",color:C.cons,desembolso:act.lanceEfetivo||0,capitalFinal:alavCapCons.final,mesInsuficiente:alavCapCons.mesInsuficiente,saldoDevedor:alavSaldoConsFinal,valorAtivo:Math.max((act.cartaTravada||0)-alavSaldoConsFinal,0),patrimonioTotal:Math.max((act.cartaTravada||0)-alavSaldoConsFinal,0)+alavCapCons.final,capRows:alavCapCons.rows},
   ];
   const sacTotal=(st.totalPaid||0)+entrada+fgts;
   const priceTotal=(pt.totalPaid||0)+entrada+fgts;
@@ -1701,13 +1709,13 @@ export default function App() {
           </InputPanel>
         </div>
         {/* PAINEL DE CAPITAL / RESULTADO */}
-        <SectionTag>patrimônio total no mês da contemplação</SectionTag>
-        <AlavancagemPanel capitalTotal={alavCapitalTotal} onCapitalChange={setAlavCapitalTotal} taxaRend={alavRendCapital} onTaxaChange={setAlavRendCapital} cmSafe={alavCmSafe} itens={itensAlav} bemLabel="bem"/>
-        <FluxoCapitalDetalhado itens={itensAlav} cmSafe={alavCmSafe}/>
+        <SectionTag>patrimônio total ao final do prazo</SectionTag>
+        <AlavancagemPanel capitalTotal={alavCapitalTotal} onCapitalChange={setAlavCapitalTotal} taxaRend={alavRendCapital} onTaxaChange={setAlavRendCapital} cmSafe={alavCmSafe} horizonte={alavHorizonte} itens={itensAlav} bemLabel="bem"/>
+        <FluxoCapitalDetalhado itens={itensAlav} cmSafe={alavCmSafe} horizonte={alavHorizonte}/>
         {/* NOTA ALAVANCAGEM */}
         <div style={{background:"rgba(251,191,36,0.07)",border:"1px solid rgba(251,191,36,0.2)",borderRadius:10,padding:"12px 16px",fontSize:11,color:C.muted,lineHeight:1.7}}>
           <span style={{color:"#fbbf24",fontWeight:600}}>// premissas · </span>
-          Modo dedicado à tese de "alavancagem de consórcio": usar menos capital no lance e manter o restante investido. Os campos aqui são independentes dos modos Imóvel e Veículo — ajuste-os para representar o seu cenário. Para simular um veículo, deixe a TR anual em 0% (CDC de veículo não tem TR — é SAC/Price puro); SAC não é praticado comercialmente em financiamento de veículo, mas o simulador calcula do mesmo jeito caso queira comparar. A parcela mensal de cada modalidade é descontada do rendimento do capital investido (cenário conservador — não pressupõe renda extra disponível). Quando o capital investido fica negativo, ele seria "coberto" à mesma taxa de rendimento informada, o que é otimista frente ao custo real de crédito emergencial. O mês de contemplação é uma estimativa, sem garantia de data. Conteúdo educacional — não constitui recomendação de investimento.
+          Modo dedicado à tese de "alavancagem de consórcio": usar menos capital no lance e manter o restante investido. Os campos aqui são independentes dos modos Imóvel e Veículo — ajuste-os para representar o seu cenário. Para simular um veículo, deixe a TR anual em 0% (CDC de veículo não tem TR — é SAC/Price puro); SAC não é praticado comercialmente em financiamento de veículo, mas o simulador calcula do mesmo jeito caso queira comparar. A parcela mensal de cada modalidade é descontada do rendimento do capital investido (cenário conservador — não pressupõe renda extra disponível). A comparação roda até o fim do prazo mais longo entre as modalidades (não para na contemplação) — o capital de quem já quitou continua rendendo até lá, e o consórcio aplica o lance no mês da contemplação e é tratado como quitado ao final do próprio prazo. Quando o capital investido fica negativo, ele seria "coberto" à mesma taxa de rendimento informada, o que é otimista frente ao custo real de crédito emergencial. O mês de contemplação é uma estimativa, sem garantia de data. Conteúdo educacional — não constitui recomendação de investimento.
         </div>
         </>)}
       </div>
