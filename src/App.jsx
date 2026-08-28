@@ -1129,9 +1129,8 @@ function CustoTotalAlavancagem({itens,bemLabel}) {
 // aplica o lance no mês da contemplação (cmSafe), mas o capital de todas
 // continua rendendo/sendo consumido até o horizonte comum. "Aplicação pura"
 // entra como grupo de controle sem nenhuma alavancagem e sem sequer comprar
-// o bem, para responder à pergunta de fundo: vale a pena alavancar (financiar
-// ou fazer consórcio com lance parcial) em vez de simplesmente deixar o
-// capital disponível rendendo, sem comprar nada?
+// nada, para responder à pergunta de fundo: vale a pena travar o lance no
+// consórcio em vez de simplesmente deixar o capital disponível rendendo?
 function AlavancagemPanel({capitalTotal,onCapitalChange,taxaRend,onTaxaChange,cmSafe,horizonte,itens,bemLabel}) {
   const thS={padding:"9px 12px",fontSize:10,fontWeight:600,textAlign:"center",color:C.muted,borderBottom:`1px solid ${C.border}`,background:C.panel2,fontFamily:F.body,textTransform:"uppercase",letterSpacing:"0.06em",whiteSpace:"nowrap"};
   const tdL={padding:"9px 12px",fontSize:12,color:C.text,borderBottom:`1px solid ${C.border}`,fontFamily:F.body};
@@ -1146,7 +1145,7 @@ function AlavancagemPanel({capitalTotal,onCapitalChange,taxaRend,onTaxaChange,cm
       </div>
       <div style={{padding:20}}>
         <div style={{fontSize:11,color:C.muted,fontFamily:F.body,lineHeight:1.6,marginBottom:16}}>
-          Simula usar só o valor de entrada/lance de cada modalidade e manter o restante do seu capital investido, rendendo à taxa abaixo — com a parcela mensal descontada desse rendimento. "Aplicação pura" é a referência sem alavancagem nenhuma e sem comprar o bem: o capital total inteiro fica investido do mês 1 até o mês {horizonte}, sem nenhuma compra e sem nenhuma parcela — mostra quanto valeria só deixar o dinheiro render. O consórcio aplica o lance no mês {cmSafe}, quando contemplaria; as demais seguem pagando parcela normalmente. Quando o rendimento não é suficiente para cobrir a parcela, o capital investido para em zero (não fica negativo) e a diferença é considerada como vindo da sua renda mensal, não de um empréstimo — mas ela é descontada do patrimônio total, já que é dinheiro que saiu do seu bolso além do capital inicial. Compara o patrimônio total (bem − dívida + capital que sobrou − aporte de renda total) no mês {horizonte}, final do prazo mais longo entre as modalidades.
+          Compara duas opções que partem do mesmo ponto de partida (você já tem o capital total, não precisa de crédito): manter tudo investido ("Aplicação pura") ou travar o lance no consórcio e manter o restante investido, rendendo à taxa abaixo — com a parcela mensal do consórcio descontada desse rendimento. O consórcio aplica o lance no mês {cmSafe}, quando contemplaria. Quando o rendimento não é suficiente para cobrir a parcela, o capital investido para em zero (não fica negativo) e a diferença é considerada como vindo da sua renda mensal, não de um empréstimo — mas ela é descontada do patrimônio total, já que é dinheiro que saiu do seu bolso além do capital inicial. Compara o patrimônio total (bem − dívida + capital que sobrou − aporte de renda total) no mês {horizonte}, final do prazo do consórcio.
         </div>
         <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:12,marginBottom:18}}>
           <InputMoney label="Capital total disponível" value={capitalTotal} onChange={onCapitalChange} hint="Quanto você tem em caixa hoje para essa decisão"/>
@@ -1311,11 +1310,8 @@ export default function App() {
   const [veicCmMes,setVeicCmMes]=useState(30);
   const [veicLance,setVeicLance]=useState(0);
   // ── alavancagem patrimonial: modo dedicado, com seus próprios campos ───────
-  const [alavValorBem,setAlavValorBem]=useState(500000);
-  const [alavEntrada,setAlavEntrada]=useState(100000);
-  const [alavCET,setAlavCET]=useState(11);
-  const [alavTR,setAlavTR]=useState(1);
-  const [alavPrazoFin,setAlavPrazoFin]=useState(200);
+  // Só consórcio: financiamento (SAC/Price) responde a uma pergunta diferente
+  // (crédito para quem não tem capital) e já existe nos modos Imóvel/Veículo.
   const [alavCarta,setAlavCarta]=useState(500000);
   const [alavAdmin,setAlavAdmin]=useState(20);
   const [alavFundo,setAlavFundo]=useState(2);
@@ -1357,33 +1353,28 @@ export default function App() {
   const veicConsTotal=vct.totalPaid||0;
   const veicMaxM=Math.min(Math.max(veicFin.rows.length,veicCons.rows.length),240);
   // ── alavancagem: derivados (modo próprio, campos próprios) ─────────────────
-  const alavRM=useMemo(()=>annualToMonthly(alavCET),[alavCET]);
-  const alavTRM=useMemo(()=>annualToMonthly(alavTR),[alavTR]);
+  // Comparação restrita a Aplicação pura vs Consórcio — as duas únicas opções
+  // que partem da MESMA premissa (você já tem o capital total, não precisa de
+  // crédito). Financiamento (SAC/Price) responde a uma pergunta diferente
+  // (crédito para quem não tem o capital) e por isso não entra aqui — essa
+  // comparação já existe nos modos Imóvel e Veículo.
   const alavIdxM=useMemo(()=>annualToMonthly(alavIdx),[alavIdx]);
   const alavCmSafe=Math.min(Math.max(Number(alavCmMes)||1,1),Math.max(Number(alavPrazoCons)||1,1));
-  const alavPrincipal=Math.max(alavValorBem-alavEntrada,0);
-  const alavSac=useMemo(()=>calcSac(alavPrincipal,alavRM,alavTRM,alavPrazoFin),[alavPrincipal,alavRM,alavTRM,alavPrazoFin]);
-  const alavPrice=useMemo(()=>calcPrice(alavPrincipal,alavRM,alavTRM,alavPrazoFin),[alavPrincipal,alavRM,alavTRM,alavPrazoFin]);
   const alavCons=useMemo(()=>calcConsorcio(alavCarta,alavPrazoCons,alavAdmin/100,alavFundo/100,alavIdxM,alavCmSafe,alavLance,0,0),[alavCarta,alavPrazoCons,alavAdmin,alavFundo,alavIdxM,alavCmSafe,alavLance]);
-  const ast=alavSac.totals,apt=alavPrice.totals,act=alavCons.totals;
+  const act=alavCons.totals;
   const alavRInvestM=annualToMonthly(alavRendCapital);
-  // horizonte comum de comparação: vai até o fim do prazo mais longo entre as
-  // modalidades, não só até a contemplação — o capital de quem já quitou segue
-  // rendendo (ou sendo consumido) até esse ponto.
-  const alavHorizonte=Math.max(Number(alavPrazoFin)||1,Number(alavPrazoCons)||1);
-  const alavCapSac=calcCapitalAlavancado(alavCapitalTotal,alavEntrada,alavRInvestM,alavSac.rows.map(r=>r.installment),alavHorizonte,0,null);
-  const alavCapPrice=calcCapitalAlavancado(alavCapitalTotal,alavEntrada,alavRInvestM,alavPrice.rows.map(r=>r.installment),alavHorizonte,0,null);
+  // horizonte de comparação: o prazo inteiro do consórcio — o capital de quem
+  // nunca comprou nada (aplicação pura) segue rendendo até lá também.
+  const alavHorizonte=Math.max(Number(alavPrazoCons)||1,1);
   const alavCapCons=calcCapitalAlavancado(alavCapitalTotal,0,alavRInvestM,alavCons.rows.map(r=>r.installment),alavHorizonte,act.lanceEfetivo||0,alavCmSafe);
   // "aplicação pura": grupo de controle sem alavancagem nenhuma e sem comprar
-  // o bem — o capital total inteiro fica investido do início ao fim, sem
+  // nada — o capital total inteiro fica investido do início ao fim, sem
   // nenhum desconto (não há parcela, nem lance, nem compra). É a referência
-  // para saber se vale a pena alavancar (financiamento OU consórcio) em vez
-  // de simplesmente deixar o dinheiro render sem comprar nada.
+  // para saber se vale a pena travar o lance no consórcio em vez de
+  // simplesmente deixar o dinheiro render sem comprar nada.
   const alavCapAplic=calcCapitalAlavancado(alavCapitalTotal,0,alavRInvestM,[],alavHorizonte,0,null);
-  const alavSaldoSacFinal=alavSac.rows[alavHorizonte-1]?.bal??0;
-  const alavSaldoPriceFinal=alavPrice.rows[alavHorizonte-1]?.bal??0;
-  // consórcio é um pool que se autoamortiza: no fim do próprio prazo (que nunca
-  // passa de alavHorizonte, por construção) a dívida do grupo já está quitada.
+  // consórcio é um pool que se autoamortiza: no fim do próprio prazo (que é o
+  // próprio alavHorizonte, por construção) a dívida do grupo já está quitada.
   const alavSaldoConsFinal=0;
   // O patrimônio total precisa descontar o aporte de renda total: é dinheiro
   // que saiu do bolso da pessoa além do capital inicial, então não pode ficar
@@ -1392,10 +1383,6 @@ export default function App() {
   const itensAlav=[
     {label:"Aplicação pura",color:C.aplic,desembolso:0,capitalFinal:alavCapAplic.final,mesInsuficiente:alavCapAplic.mesInsuficiente,aporteRendaTotal:alavCapAplic.aporteRendaTotal,saldoDevedor:0,valorAtivo:0,patrimonioTotal:alavCapAplic.final-alavCapAplic.aporteRendaTotal,capRows:alavCapAplic.rows,
       naoComprou:true,totalParcelas:0,custoCreditoLabel:null,custoCredito:0,totalPago:0,custoTotal:0,custoPct:0},
-    {label:"SAC",color:C.sac,desembolso:alavEntrada,capitalFinal:alavCapSac.final,mesInsuficiente:alavCapSac.mesInsuficiente,aporteRendaTotal:alavCapSac.aporteRendaTotal,saldoDevedor:alavSaldoSacFinal,valorAtivo:Math.max(alavValorBem-alavSaldoSacFinal,0),patrimonioTotal:Math.max(alavValorBem-alavSaldoSacFinal,0)+alavCapSac.final-alavCapSac.aporteRendaTotal,capRows:alavCapSac.rows,
-      naoComprou:false,totalParcelas:ast.totalPaid||0,custoCreditoLabel:"Juros + TR",custoCredito:(ast.totalInterest||0)+(ast.totalTR||0),totalPago:alavEntrada+(ast.totalPaid||0),custoTotal:alavEntrada+(ast.totalPaid||0)-alavValorBem,custoPct:alavValorBem>0?((alavEntrada+(ast.totalPaid||0)-alavValorBem)/alavValorBem)*100:0},
-    {label:"Price",color:C.price,desembolso:alavEntrada,capitalFinal:alavCapPrice.final,mesInsuficiente:alavCapPrice.mesInsuficiente,aporteRendaTotal:alavCapPrice.aporteRendaTotal,saldoDevedor:alavSaldoPriceFinal,valorAtivo:Math.max(alavValorBem-alavSaldoPriceFinal,0),patrimonioTotal:Math.max(alavValorBem-alavSaldoPriceFinal,0)+alavCapPrice.final-alavCapPrice.aporteRendaTotal,capRows:alavCapPrice.rows,
-      naoComprou:false,totalParcelas:apt.totalPaid||0,custoCreditoLabel:"Juros + TR",custoCredito:(apt.totalInterest||0)+(apt.totalTR||0),totalPago:alavEntrada+(apt.totalPaid||0),custoTotal:alavEntrada+(apt.totalPaid||0)-alavValorBem,custoPct:alavValorBem>0?((alavEntrada+(apt.totalPaid||0)-alavValorBem)/alavValorBem)*100:0},
     {label:"Consórcio",color:C.cons,desembolso:act.lanceEfetivo||0,capitalFinal:alavCapCons.final,mesInsuficiente:alavCapCons.mesInsuficiente,aporteRendaTotal:alavCapCons.aporteRendaTotal,saldoDevedor:alavSaldoConsFinal,valorAtivo:Math.max((act.cartaTravada||0)-alavSaldoConsFinal,0),patrimonioTotal:Math.max((act.cartaTravada||0)-alavSaldoConsFinal,0)+alavCapCons.final-alavCapCons.aporteRendaTotal,capRows:alavCapCons.rows,
       naoComprou:false,totalParcelas:act.totalPaid||0,custoCreditoLabel:"Adm. + fundo + correção",custoCredito:(act.totalAdm||0)+(act.totalFundo||0)+(act.totalIdxPre||0)+(act.totalIdxPos||0),totalPago:(act.lanceEfetivo||0)+(act.totalPaid||0),custoTotal:(act.lanceEfetivo||0)+(act.totalPaid||0)-(act.cartaTravada||0),custoPct:(act.cartaTravada||0)>0?(((act.lanceEfetivo||0)+(act.totalPaid||0)-(act.cartaTravada||0))/(act.cartaTravada||0))*100:0},
   ];
@@ -1421,7 +1408,7 @@ export default function App() {
       return {mes:cm,Consórcio:patrimonioCm};
     });
   },[alavCarta,alavPrazoCons,alavAdmin,alavFundo,alavIdxM,alavLance,alavCapitalTotal,alavRInvestM,alavHorizonte,alavCmSafe]);
-  const alavPatAplic=itensAlav[0].patrimonioTotal,alavPatSac=itensAlav[1].patrimonioTotal,alavPatPrice=itensAlav[2].patrimonioTotal;
+  const alavPatAplic=itensAlav[0].patrimonioTotal;
   const sacTotal=(st.totalPaid||0)+entrada+fgts;
   const priceTotal=(pt.totalPaid||0)+entrada+fgts;
   const consTotal=(ct.totalPaid||0)+aluguelTotal;
@@ -1812,14 +1799,7 @@ export default function App() {
         {modo==="alavancagem"&&(<>
         {/* INPUTS ALAVANCAGEM */}
         <SectionTag>parâmetros da simulação</SectionTag>
-        <div className="sim-inputs" style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:12,marginBottom:20}}>
-          <InputPanel accentColor={C.sac} label="financiamento — SAC e Price">
-            <InputMoney label="Valor do bem"      value={alavValorBem} onChange={setAlavValorBem}/>
-            <InputMoney label="Entrada"           value={alavEntrada}  onChange={setAlavEntrada}/>
-            <InputPct   label="CET anual"         value={alavCET}      onChange={setAlavCET} hint="Inclui juros, seguros e taxas"/>
-            <InputPct   label="TR anual"          value={alavTR}       onChange={setAlavTR} hint="Deixe 0 para veículo (CDC não tem TR)"/>
-            <InputInt   label="Prazo (meses)"     value={alavPrazoFin} onChange={setAlavPrazoFin} hint={`Financia ${brl(alavPrincipal)}`}/>
-          </InputPanel>
+        <div className="sim-inputs" style={{display:"grid",gridTemplateColumns:"minmax(0,560px)",gap:12,marginBottom:20}}>
           <InputPanel accentColor={C.cons} label="consórcio">
             <InputMoney label="Carta de crédito"         value={alavCarta}     onChange={setAlavCarta}/>
             <InputPct   label="Taxa de administração"    value={alavAdmin}     onChange={setAlavAdmin}/>
@@ -1839,7 +1819,7 @@ export default function App() {
         <FluxoCapitalDetalhado itens={itensAlav} cmSafe={alavCmSafe} horizonte={alavHorizonte}/>
         {/* SENSIBILIDADE AO MÊS DA CONTEMPLAÇÃO */}
         <SectionTag>sensibilidade ao mês da contemplação</SectionTag>
-        <ChartCard title="Patrimônio total do consórcio, por mês de contemplação" subtitle={`Cada ponto simula o consórcio sendo contemplado em um mês diferente (mantendo os demais parâmetros fixos), comparado ao patrimônio de Aplicação pura, SAC e Price — que não dependem do mês da contemplação. O ponto ★ é o mês ${alavCmSafe} configurado acima. Isso mostra o quanto o resultado do consórcio depende de um fator de sorte que você não controla.`}>
+        <ChartCard title="Patrimônio total do consórcio, por mês de contemplação" subtitle={`Cada ponto simula o consórcio sendo contemplado em um mês diferente (mantendo os demais parâmetros fixos), comparado ao patrimônio de Aplicação pura — que não depende do mês da contemplação, porque não envolve sorteio. O ponto ★ é o mês ${alavCmSafe} configurado acima. Isso mostra o quanto o resultado do consórcio depende de um fator de sorte que você não controla.`}>
           <ResponsiveContainer>
             <LineChart data={alavSensibilidade}>
               <CartesianGrid strokeDasharray="3 3" stroke={C.border}/>
@@ -1848,20 +1828,18 @@ export default function App() {
               <Tooltip content={<CustomTooltip/>}/>
               <Legend/>
               <ReferenceLine y={alavPatAplic} stroke={C.aplic} strokeDasharray="4 3" label={{value:"Aplicação pura",position:"insideTopLeft",fontSize:10,fill:C.aplic,fontFamily:F.body}}/>
-              <ReferenceLine y={alavPatSac} stroke={C.sac} strokeDasharray="4 3" label={{value:"SAC",position:"insideBottomLeft",fontSize:10,fill:C.sac,fontFamily:F.body}}/>
-              <ReferenceLine y={alavPatPrice} stroke={C.price} strokeDasharray="4 3" label={{value:"Price",position:"insideTopLeft",fontSize:10,fill:C.price,fontFamily:F.body}}/>
               <ReferenceLine x={alavCmSafe} stroke={C.accent} strokeDasharray="2 2" label={{value:"★ seu cenário",position:"top",fontSize:10,fill:C.accent,fontFamily:F.body}}/>
               <Line type="monotone" dataKey="Consórcio" name="Consórcio" stroke={C.cons} strokeWidth={2} dot={{r:3}}/>
             </LineChart>
           </ResponsiveContainer>
         </ChartCard>
         <div style={{fontSize:11,color:C.muted,fontFamily:F.body,lineHeight:1.6,marginBottom:16,marginTop:-4}}>
-          Repare que Aplicação pura, SAC e Price aparecem como linhas retas: nenhuma delas depende de quando você seria contemplado, porque nenhuma envolve sorteio. Só o Consórcio varia — e pode ficar tanto acima quanto abaixo das outras modalidades dependendo do mês em que a sorte (ou o lance) te contemplar.
+          Repare que "Aplicação pura" aparece como uma linha reta: ela não depende de quando você seria contemplado, porque não envolve sorteio nenhum. Só o Consórcio varia — e pode ficar tanto acima quanto abaixo dependendo do mês em que a sorte (ou o lance) te contemplar.
         </div>
         {/* NOTA ALAVANCAGEM */}
         <div style={{background:"rgba(251,191,36,0.07)",border:"1px solid rgba(251,191,36,0.2)",borderRadius:10,padding:"12px 16px",fontSize:11,color:C.muted,lineHeight:1.7}}>
           <span style={{color:"#fbbf24",fontWeight:600}}>// premissas · </span>
-          Modo dedicado à tese de "alavancagem de consórcio": usar menos capital no lance e manter o restante investido. "Aplicação pura" é o grupo de controle sem alavancagem e sem comprar o bem — o mesmo capital total, 100% investido do início ao fim; é contra ela que faz mais sentido julgar se financiar ou fazer consórcio com lance parcial realmente compensa em relação a simplesmente deixar o dinheiro render. Os campos aqui são independentes dos modos Imóvel e Veículo — ajuste-os para representar o seu cenário. Para simular um veículo, deixe a TR anual em 0% (CDC de veículo não tem TR — é SAC/Price puro); SAC não é praticado comercialmente em financiamento de veículo, mas o simulador calcula do mesmo jeito caso queira comparar. A parcela mensal de cada modalidade é descontada do rendimento do capital investido. A comparação roda até o fim do prazo mais longo entre as modalidades (não para na contemplação) — o capital de quem já quitou continua rendendo até lá, e o consórcio aplica o lance no mês da contemplação e é tratado como quitado ao final do próprio prazo. Quando o rendimento não cobre a parcela, o capital investido para em zero (não vira dívida rendendo a mesma taxa) e a diferença é contabilizada como "aporte de renda" — dinheiro que sairia do seu orçamento mensal normal, e não de um empréstimo. O mês de contemplação é uma estimativa, sem garantia de data. Conteúdo educacional — não constitui recomendação de investimento.
+          Modo dedicado à tese de "alavancagem de consórcio": usar menos capital no lance e manter o restante investido. Compara só duas coisas que partem da mesma premissa (você já tem o capital total, não precisa de crédito): "Aplicação pura" — não compra nada, capital 100% investido do início ao fim — contra "Consórcio" — trava o lance, e o restante do capital fica investido, pagando a parcela mensal. Financiamento (SAC/Price) fica de fora daqui de propósito: é uma resposta para quem não tem o capital total e precisa de crédito, uma pergunta diferente da que este modo responde — essa comparação já existe nos modos Imóvel e Veículo. A comparação aqui roda até o fim do prazo do consórcio (não para na contemplação) — o capital de quem nunca comprou nada continua rendendo até lá, e o consórcio aplica o lance no mês da contemplação e é tratado como quitado ao final do próprio prazo. Quando o rendimento não cobre a parcela, o capital investido para em zero (não vira dívida rendendo a mesma taxa) e a diferença é contabilizada como "aporte de renda" — dinheiro que sairia do seu orçamento mensal normal, e não de um empréstimo. O mês de contemplação é uma estimativa, sem garantia de data. Conteúdo educacional — não constitui recomendação de investimento.
         </div>
         </>)}
       </div>
