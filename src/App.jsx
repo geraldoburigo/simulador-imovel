@@ -276,12 +276,15 @@ function calcCapitalAlavancado(capitalTotal,desembolsoMes0,rInvestM,parcelasPorM
   const rows=[];
   for(let m=1;m<=meses;m++){
     const balInicio=bal;
+    // lance sai do bolso no início do mês da contemplação — igual à entrada, que
+    // já é descontada antes do mês 1 render. Assim o capital não rende sobre um
+    // valor que na prática já não está mais nas mãos do investidor.
+    const lanceAplicado=(desembolsoExtra>0&&m===mesDesembolsoExtra)?desembolsoExtra:0;
+    if(lanceAplicado>0) bal-=lanceAplicado;
     const rendimento=bal*rInvestM;
     bal+=rendimento;
     const parcela=parcelasPorMes[m-1]||0;
     bal-=parcela;
-    const lanceAplicado=(desembolsoExtra>0&&m===mesDesembolsoExtra)?desembolsoExtra:0;
-    if(lanceAplicado>0) bal-=lanceAplicado;
     if(bal<0&&mesInsuficiente===null) mesInsuficiente=m;
     rows.push({month:m,balInicio,rendimento,parcela,lanceAplicado,bal});
   }
