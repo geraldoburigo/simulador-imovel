@@ -1046,8 +1046,7 @@ function CustosDetalhadosVeiculo({ft,vct,finTotal,consTotal,principal,entrada,io
 // cada modalidade: (valor do bem − saldo devedor naquele mês) + o que sobrou do
 // capital total disponível, ainda investido (rendendo, descontada a parcela
 // mensal de cada modalidade — ver calcCapitalAlavancado).
-function AlavancagemPanel({ativa,onToggle,capitalTotal,onCapitalChange,taxaRend,onTaxaChange,cmSafe,itens,bemLabel}) {
-  const [open,setOpen]=useState(true);
+function AlavancagemPanel({capitalTotal,onCapitalChange,taxaRend,onTaxaChange,cmSafe,itens,bemLabel}) {
   const thS={padding:"9px 12px",fontSize:10,fontWeight:600,textAlign:"center",color:C.muted,borderBottom:`1px solid ${C.border}`,background:C.panel2,fontFamily:F.body,textTransform:"uppercase",letterSpacing:"0.06em",whiteSpace:"nowrap"};
   const tdL={padding:"9px 12px",fontSize:12,color:C.text,borderBottom:`1px solid ${C.border}`,fontFamily:F.body};
   const tdC=(bold,color,hl)=>({padding:"9px 12px",fontSize:12,textAlign:"center",borderBottom:`1px solid ${C.border}`,fontFamily:F.body,fontWeight:bold?700:400,color:color||C.text,background:hl?C.accentHl:"transparent",whiteSpace:"nowrap"});
@@ -1055,60 +1054,53 @@ function AlavancagemPanel({ativa,onToggle,capitalTotal,onCapitalChange,taxaRend,
   const algumInsuficiente=itens.some(i=>i.mesInsuficiente!=null);
   return (
     <div style={{background:C.panel,borderRadius:10,border:`1px solid ${C.border}`,overflow:"hidden",marginBottom:16}}>
-      <div style={{background:C.panel2,borderBottom:ativa?`1px solid ${C.border}`:"none",padding:"12px 20px",display:"flex",alignItems:"center",justifyContent:"space-between",gap:10,flexWrap:"wrap"}}>
-        <div style={{display:"flex",alignItems:"center",gap:10}}>
-          <div style={{width:3,height:18,borderRadius:2,background:C.accent,flexShrink:0}}/>
-          <span style={{fontFamily:F.body,fontSize:13,fontWeight:600,color:C.text,letterSpacing:"0.03em"}}>custo de oportunidade / alavancagem</span>
-        </div>
-        <button onClick={onToggle} style={{padding:"4px 12px",borderRadius:6,border:`1px solid ${ativa?C.accent:C.border}`,background:ativa?C.accentBg:"transparent",color:ativa?C.accent:C.muted,fontFamily:F.body,fontSize:11,fontWeight:600}}>
-          {ativa?"ativado ✓":"ativar"}
-        </button>
+      <div style={{background:C.panel2,borderBottom:`1px solid ${C.border}`,padding:"12px 20px",display:"flex",alignItems:"center",gap:10}}>
+        <div style={{width:3,height:18,borderRadius:2,background:C.accent,flexShrink:0}}/>
+        <span style={{fontFamily:F.body,fontSize:13,fontWeight:600,color:C.text,letterSpacing:"0.03em"}}>seu capital</span>
       </div>
-      {ativa&&(
-        <div style={{padding:20}}>
-          <div style={{fontSize:11,color:C.muted,fontFamily:F.body,lineHeight:1.6,marginBottom:16}}>
-            Simula usar só o valor de entrada/lance de cada modalidade e manter o restante do seu capital investido, rendendo à taxa abaixo — com a parcela mensal descontada desse rendimento. Compara o patrimônio total (bem − dívida + capital que sobrou) no mês {cmSafe}, quando o consórcio contemplaria.
-          </div>
-          <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:12,marginBottom:18}}>
-            <InputMoney label="Capital total disponível" value={capitalTotal} onChange={onCapitalChange} hint="Quanto você tem em caixa hoje para essa decisão"/>
-            <InputPct   label="Rendimento do capital (a.a.)" value={taxaRend} onChange={onTaxaChange} hint="Taxa da aplicação onde o capital não usado ficaria (ex: CDI líquido)"/>
-          </div>
-          <div style={{overflowX:"auto"}}>
-            <table cellPadding="0" style={{borderCollapse:"separate",borderSpacing:0,width:"100%",minWidth:520}}>
-              <thead>
-                <tr>
-                  <th style={{...thS,textAlign:"left"}}>Modalidade</th>
-                  <th style={thS}>Desembolso imediato</th>
-                  <th style={thS}>Capital ainda investido (mês {cmSafe})</th>
-                  <th style={thS}>Saldo devedor (mês {cmSafe})</th>
-                  <th style={thS}>Patrimônio do {bemLabel}</th>
-                  <th style={thS}>Patrimônio total</th>
-                </tr>
-              </thead>
-              <tbody>
-                {itens.map((it,i)=>{
-                  const isMax=it.patrimonioTotal===maxPatrim;
-                  return (
-                    <tr key={it.label} style={{background:i%2===0?C.panel:C.panel2}}>
-                      <td style={{...tdL,fontWeight:600,color:it.color}}>{it.label}</td>
-                      <td style={tdC()}>{brl(it.desembolso)}</td>
-                      <td style={tdC(false,it.capitalFinal<0?"#f87171":C.text)}>{brl(it.capitalFinal)}</td>
-                      <td style={tdC()}>{brl(it.saldoDevedor)}</td>
-                      <td style={tdC()}>{brl(it.valorAtivo)}</td>
-                      <td style={tdC(isMax,isMax?C.accent:C.text,isMax)}>{brl(it.patrimonioTotal)}{isMax&&" ✓"}</td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
-          </div>
-          {algumInsuficiente&&(
-            <div style={{marginTop:12,fontSize:11,color:"#fbbf24",fontFamily:F.body,lineHeight:1.6,background:"rgba(251,191,36,0.07)",border:"1px solid rgba(251,191,36,0.2)",borderRadius:8,padding:"10px 14px"}}>
-              ⚠ {itens.filter(i=>i.mesInsuficiente!=null).map(i=>`${i.label} (a partir do mês ${i.mesInsuficiente})`).join(", ")}: o rendimento do capital não foi suficiente para cobrir a parcela em algum momento — a partir daí, o capital investido passa a ser consumido (ficando negativo), o que na prática exigiria aporte extra de renda.
-            </div>
-          )}
+      <div style={{padding:20}}>
+        <div style={{fontSize:11,color:C.muted,fontFamily:F.body,lineHeight:1.6,marginBottom:16}}>
+          Simula usar só o valor de entrada/lance de cada modalidade e manter o restante do seu capital investido, rendendo à taxa abaixo — com a parcela mensal descontada desse rendimento. Compara o patrimônio total (bem − dívida + capital que sobrou) no mês {cmSafe}, quando o consórcio contemplaria.
         </div>
-      )}
+        <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:12,marginBottom:18}}>
+          <InputMoney label="Capital total disponível" value={capitalTotal} onChange={onCapitalChange} hint="Quanto você tem em caixa hoje para essa decisão"/>
+          <InputPct   label="Rendimento do capital (a.a.)" value={taxaRend} onChange={onTaxaChange} hint="Taxa da aplicação onde o capital não usado ficaria (ex: CDI líquido)"/>
+        </div>
+        <div style={{overflowX:"auto"}}>
+          <table cellPadding="0" style={{borderCollapse:"separate",borderSpacing:0,width:"100%",minWidth:520}}>
+            <thead>
+              <tr>
+                <th style={{...thS,textAlign:"left"}}>Modalidade</th>
+                <th style={thS}>Desembolso imediato</th>
+                <th style={thS}>Capital ainda investido (mês {cmSafe})</th>
+                <th style={thS}>Saldo devedor (mês {cmSafe})</th>
+                <th style={thS}>Patrimônio do {bemLabel}</th>
+                <th style={thS}>Patrimônio total</th>
+              </tr>
+            </thead>
+            <tbody>
+              {itens.map((it,i)=>{
+                const isMax=it.patrimonioTotal===maxPatrim;
+                return (
+                  <tr key={it.label} style={{background:i%2===0?C.panel:C.panel2}}>
+                    <td style={{...tdL,fontWeight:600,color:it.color}}>{it.label}</td>
+                    <td style={tdC()}>{brl(it.desembolso)}</td>
+                    <td style={tdC(false,it.capitalFinal<0?"#f87171":C.text)}>{brl(it.capitalFinal)}</td>
+                    <td style={tdC()}>{brl(it.saldoDevedor)}</td>
+                    <td style={tdC()}>{brl(it.valorAtivo)}</td>
+                    <td style={tdC(isMax,isMax?C.accent:C.text,isMax)}>{brl(it.patrimonioTotal)}{isMax&&" ✓"}</td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+        {algumInsuficiente&&(
+          <div style={{marginTop:12,fontSize:11,color:"#fbbf24",fontFamily:F.body,lineHeight:1.6,background:"rgba(251,191,36,0.07)",border:"1px solid rgba(251,191,36,0.2)",borderRadius:8,padding:"10px 14px"}}>
+            ⚠ {itens.filter(i=>i.mesInsuficiente!=null).map(i=>`${i.label} (a partir do mês ${i.mesInsuficiente})`).join(", ")}: o rendimento do capital não foi suficiente para cobrir a parcela em algum momento — a partir daí, o capital investido passa a ser consumido (ficando negativo), o que na prática exigiria aporte extra de renda.
+          </div>
+        )}
+      </div>
     </div>
   );
 }
@@ -1151,13 +1143,21 @@ export default function App() {
   const [veicPrazoCons,setVeicPrazoCons]=useState(70);
   const [veicCmMes,setVeicCmMes]=useState(30);
   const [veicLance,setVeicLance]=useState(0);
-  // ── custo de oportunidade / alavancagem ────────────────────────────────────
-  const [alavAtivaImovel,setAlavAtivaImovel]=useState(false);
-  const [capitalTotalImovel,setCapitalTotalImovel]=useState(100000);
-  const [rendCapitalImovel,setRendCapitalImovel]=useState(12);
-  const [alavAtivaVeic,setAlavAtivaVeic]=useState(false);
-  const [capitalTotalVeic,setCapitalTotalVeic]=useState(80000);
-  const [rendCapitalVeic,setRendCapitalVeic]=useState(12);
+  // ── alavancagem patrimonial: modo dedicado, com seus próprios campos ───────
+  const [alavValorBem,setAlavValorBem]=useState(500000);
+  const [alavEntrada,setAlavEntrada]=useState(100000);
+  const [alavCET,setAlavCET]=useState(11);
+  const [alavTR,setAlavTR]=useState(1);
+  const [alavPrazoFin,setAlavPrazoFin]=useState(200);
+  const [alavCarta,setAlavCarta]=useState(500000);
+  const [alavAdmin,setAlavAdmin]=useState(20);
+  const [alavFundo,setAlavFundo]=useState(2);
+  const [alavIdx,setAlavIdx]=useState(6);
+  const [alavPrazoCons,setAlavPrazoCons]=useState(200);
+  const [alavCmMes,setAlavCmMes]=useState(80);
+  const [alavLance,setAlavLance]=useState(100000);
+  const [alavCapitalTotal,setAlavCapitalTotal]=useState(200000);
+  const [alavRendCapital,setAlavRendCapital]=useState(12);
   const rM=useMemo(()=>annualToMonthly(juros),[juros]);
   const trM=useMemo(()=>annualToMonthly(trAnual),[trAnual]);
   const idxM=useMemo(()=>annualToMonthly(idxAnual),[idxAnual]);
@@ -1177,19 +1177,6 @@ export default function App() {
     return Array.from({length:cmSafe},(_,i)=>aluguelMensal*(1+idxM)**i);
   },[aluguelMensal,cmSafe,idxM]);
   const aluguelTotal=aluguelPorMes.reduce((a,v)=>a+v,0);
-  // ── imóvel: alavancagem / custo de oportunidade ────────────────────────────
-  const rInvestImovelM=annualToMonthly(rendCapitalImovel);
-  const capSac=calcCapitalAlavancado(capitalTotalImovel,entrada,rInvestImovelM,sac.rows.map(r=>r.installment),cmSafe,0,null);
-  const capPrice=calcCapitalAlavancado(capitalTotalImovel,entrada,rInvestImovelM,price.rows.map(r=>r.installment),cmSafe,0,null);
-  const capCons=calcCapitalAlavancado(capitalTotalImovel,0,rInvestImovelM,cons.rows.map(r=>r.installment),cmSafe,ct.lanceEfetivo||0,cmSafe);
-  const saldoFinSacCm=sac.rows[cmSafe-1]?.bal??0;
-  const saldoFinPriceCm=price.rows[cmSafe-1]?.bal??0;
-  const saldoPosConsCm=ct.saldoPos??0;
-  const itensAlavImovel=[
-    {label:"SAC",color:C.sac,desembolso:entrada,capitalFinal:capSac.final,mesInsuficiente:capSac.mesInsuficiente,saldoDevedor:saldoFinSacCm,valorAtivo:Math.max(imovel-saldoFinSacCm,0),patrimonioTotal:Math.max(imovel-saldoFinSacCm,0)+capSac.final},
-    {label:"Price",color:C.price,desembolso:entrada,capitalFinal:capPrice.final,mesInsuficiente:capPrice.mesInsuficiente,saldoDevedor:saldoFinPriceCm,valorAtivo:Math.max(imovel-saldoFinPriceCm,0),patrimonioTotal:Math.max(imovel-saldoFinPriceCm,0)+capPrice.final},
-    {label:"Consórcio",color:C.cons,desembolso:ct.lanceEfetivo||0,capitalFinal:capCons.final,mesInsuficiente:capCons.mesInsuficiente,saldoDevedor:saldoPosConsCm,valorAtivo:Math.max((ct.cartaTravada||0)-saldoPosConsCm,0),patrimonioTotal:Math.max((ct.cartaTravada||0)-saldoPosConsCm,0)+capCons.final},
-  ];
   // ── veículo: derivados ─────────────────────────────────────────────────────
   const veicRM=useMemo(()=>annualToMonthly(veicCET),[veicCET]);
   const veicIdxM=useMemo(()=>annualToMonthly(veicIdx),[veicIdx]);
@@ -1202,15 +1189,23 @@ export default function App() {
   const veicFinTotal=(ft.totalPaid||0)+veicEntrada;
   const veicConsTotal=vct.totalPaid||0;
   const veicMaxM=Math.min(Math.max(veicFin.rows.length,veicCons.rows.length),240);
-  // ── veículo: alavancagem / custo de oportunidade ───────────────────────────
-  const rInvestVeicM=annualToMonthly(rendCapitalVeic);
-  const capVeicFin=calcCapitalAlavancado(capitalTotalVeic,veicEntrada,rInvestVeicM,veicFin.rows.map(r=>r.installment),veicCmSafe,0,null);
-  const capVeicCons=calcCapitalAlavancado(capitalTotalVeic,0,rInvestVeicM,veicCons.rows.map(r=>r.installment),veicCmSafe,vct.lanceEfetivo||0,veicCmSafe);
-  const saldoFinVeicCm=veicFin.rows[veicCmSafe-1]?.bal??0;
-  const saldoPosVeicConsCm=vct.saldoPos??0;
-  const itensAlavVeic=[
-    {label:"Financiamento",color:C.sac,desembolso:veicEntrada,capitalFinal:capVeicFin.final,mesInsuficiente:capVeicFin.mesInsuficiente,saldoDevedor:saldoFinVeicCm,valorAtivo:Math.max(veicValor-saldoFinVeicCm,0),patrimonioTotal:Math.max(veicValor-saldoFinVeicCm,0)+capVeicFin.final},
-    {label:"Consórcio",color:C.cons,desembolso:vct.lanceEfetivo||0,capitalFinal:capVeicCons.final,mesInsuficiente:capVeicCons.mesInsuficiente,saldoDevedor:saldoPosVeicConsCm,valorAtivo:Math.max((vct.cartaTravada||0)-saldoPosVeicConsCm,0),patrimonioTotal:Math.max((vct.cartaTravada||0)-saldoPosVeicConsCm,0)+capVeicCons.final},
+  // ── alavancagem: derivados (modo próprio, campos próprios) ─────────────────
+  const alavRM=useMemo(()=>annualToMonthly(alavCET),[alavCET]);
+  const alavTRM=useMemo(()=>annualToMonthly(alavTR),[alavTR]);
+  const alavIdxM=useMemo(()=>annualToMonthly(alavIdx),[alavIdx]);
+  const alavCmSafe=Math.min(Math.max(Number(alavCmMes)||1,1),Math.max(Number(alavPrazoCons)||1,1));
+  const alavPrincipal=Math.max(alavValorBem-alavEntrada,0);
+  const alavFin=useMemo(()=>calcPrice(alavPrincipal,alavRM,alavTRM,alavPrazoFin),[alavPrincipal,alavRM,alavTRM,alavPrazoFin]);
+  const alavCons=useMemo(()=>calcConsorcio(alavCarta,alavPrazoCons,alavAdmin/100,alavFundo/100,alavIdxM,alavCmSafe,alavLance,0,0),[alavCarta,alavPrazoCons,alavAdmin,alavFundo,alavIdxM,alavCmSafe,alavLance]);
+  const aft=alavFin.totals,act=alavCons.totals;
+  const alavRInvestM=annualToMonthly(alavRendCapital);
+  const alavCapFin=calcCapitalAlavancado(alavCapitalTotal,alavEntrada,alavRInvestM,alavFin.rows.map(r=>r.installment),alavCmSafe,0,null);
+  const alavCapCons=calcCapitalAlavancado(alavCapitalTotal,0,alavRInvestM,alavCons.rows.map(r=>r.installment),alavCmSafe,act.lanceEfetivo||0,alavCmSafe);
+  const alavSaldoFinCm=alavFin.rows[alavCmSafe-1]?.bal??0;
+  const alavSaldoPosConsCm=act.saldoPos??0;
+  const itensAlav=[
+    {label:"Financiamento",color:C.sac,desembolso:alavEntrada,capitalFinal:alavCapFin.final,mesInsuficiente:alavCapFin.mesInsuficiente,saldoDevedor:alavSaldoFinCm,valorAtivo:Math.max(alavValorBem-alavSaldoFinCm,0),patrimonioTotal:Math.max(alavValorBem-alavSaldoFinCm,0)+alavCapFin.final},
+    {label:"Consórcio",color:C.cons,desembolso:act.lanceEfetivo||0,capitalFinal:alavCapCons.final,mesInsuficiente:alavCapCons.mesInsuficiente,saldoDevedor:alavSaldoPosConsCm,valorAtivo:Math.max((act.cartaTravada||0)-alavSaldoPosConsCm,0),patrimonioTotal:Math.max((act.cartaTravada||0)-alavSaldoPosConsCm,0)+alavCapCons.final},
   ];
   const sacTotal=(st.totalPaid||0)+entrada+fgts;
   const priceTotal=(pt.totalPaid||0)+entrada+fgts;
@@ -1294,12 +1289,12 @@ export default function App() {
         <div style={{display:"flex",alignItems:"center",gap:14}}>
           <div style={{width:3,height:28,borderRadius:2,background:C.accent,flexShrink:0}}/>
           <div>
-            <div style={{fontSize:15,fontWeight:600,color:C.text,lineHeight:1.2,fontFamily:F.body}}>{modo==="imovel"?"Simulador de Financiamento Imobiliário":"Simulador de Financiamento de Veículo"}</div>
-            <div style={{fontSize:11,color:C.muted,marginTop:2,fontFamily:F.body}}>{modo==="imovel"?"by Geraldo Búrigo, CNPI · comparativo SAC · Price · Consórcio":"by Geraldo Búrigo, CNPI · comparativo Financiamento (CDC) · Consórcio"}</div>
+            <div style={{fontSize:15,fontWeight:600,color:C.text,lineHeight:1.2,fontFamily:F.body}}>{modo==="imovel"?"Simulador de Financiamento Imobiliário":modo==="veiculo"?"Simulador de Financiamento de Veículo":"Simulador de Alavancagem Patrimonial"}</div>
+            <div style={{fontSize:11,color:C.muted,marginTop:2,fontFamily:F.body}}>{modo==="imovel"?"by Geraldo Búrigo, CNPI · comparativo SAC · Price · Consórcio":modo==="veiculo"?"by Geraldo Búrigo, CNPI · comparativo Financiamento (CDC) · Consórcio":"by Geraldo Búrigo, CNPI · custo de oportunidade do capital"}</div>
           </div>
         </div>
         <div style={{display:"flex",gap:6}}>
-          {[{v:"imovel",label:"Imóvel"},{v:"veiculo",label:"Veículo"}].map(op=>(
+          {[{v:"imovel",label:"Imóvel"},{v:"veiculo",label:"Veículo"},{v:"alavancagem",label:"Alavancagem"}].map(op=>(
             <button key={op.v} onClick={()=>setModo(op.v)} style={{padding:"6px 14px",borderRadius:7,border:`1px solid ${modo===op.v?C.accent:C.border}`,background:modo===op.v?C.accentBg:"transparent",color:modo===op.v?C.accent:C.muted,fontFamily:F.body,fontSize:12,fontWeight:600,transition:"all 0.15s"}}>
               {op.label}
             </button>
@@ -1421,8 +1416,6 @@ export default function App() {
         </div>
         {/* CUSTOS DETALHADOS */}
         <CustosDetalhados st={st} pt={pt} ct={ct} sacTotal={sacTotal} priceTotal={priceTotal} consTotal={consTotal} principal={principal} entrada={entrada} fgts={fgts} aluguelTotal={aluguelTotal} cmSafe={cmSafe} amortAtiva={amortAtiva}/>
-        {/* ALAVANCAGEM */}
-        <AlavancagemPanel ativa={alavAtivaImovel} onToggle={()=>setAlavAtivaImovel(a=>!a)} capitalTotal={capitalTotalImovel} onCapitalChange={setCapitalTotalImovel} taxaRend={rendCapitalImovel} onTaxaChange={setRendCapitalImovel} cmSafe={cmSafe} itens={itensAlavImovel} bemLabel="imóvel"/>
         {/* GRÁFICOS */}
         <SectionTag>evolução ao longo do tempo</SectionTag>
         <ChartCard title="// parcela mensal" subtitle="Evolução mês a mês de cada modalidade. Clique na legenda para ocultar uma linha.">
@@ -1548,8 +1541,6 @@ export default function App() {
         </div>
         {/* CUSTOS DETALHADOS VEÍCULO */}
         <CustosDetalhadosVeiculo ft={ft} vct={vct} finTotal={veicFinTotal} consTotal={veicConsTotal} principal={veicPrincipal} entrada={veicEntrada} iof={veicIofSafe} cmSafe={veicCmSafe}/>
-        {/* ALAVANCAGEM VEÍCULO */}
-        <AlavancagemPanel ativa={alavAtivaVeic} onToggle={()=>setAlavAtivaVeic(a=>!a)} capitalTotal={capitalTotalVeic} onCapitalChange={setCapitalTotalVeic} taxaRend={rendCapitalVeic} onTaxaChange={setRendCapitalVeic} cmSafe={veicCmSafe} itens={itensAlavVeic} bemLabel="veículo"/>
         {/* GRÁFICOS VEÍCULO */}
         <SectionTag>evolução ao longo do tempo</SectionTag>
         <ChartCard title="// parcela mensal" subtitle="Evolução mês a mês de cada modalidade.">
@@ -1601,6 +1592,36 @@ export default function App() {
         <div style={{background:"rgba(251,191,36,0.07)",border:"1px solid rgba(251,191,36,0.2)",borderRadius:10,padding:"12px 16px",fontSize:11,color:C.muted,lineHeight:1.7}}>
           <span style={{color:"#fbbf24",fontWeight:600}}>// premissas · </span>
           Financiamento de veículo modelado como Tabela Price sem correção monetária (TR), já que não se aplica a CDC de veículo. IOF é informado manualmente e somado ao valor financiado. Consórcio de veículo usa a mesma mecânica do consórcio imobiliário — carta, taxa de administração, fundo de reserva e indexador — mas com prazos e taxas típicos do bem. O mês de contemplação é uma estimativa, sem garantia de data. Conteúdo educacional — não constitui recomendação de investimento.
+        </div>
+        </>)}
+        {modo==="alavancagem"&&(<>
+        {/* INPUTS ALAVANCAGEM */}
+        <SectionTag>parâmetros da simulação</SectionTag>
+        <div className="sim-inputs" style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:12,marginBottom:20}}>
+          <InputPanel accentColor={C.sac} label="financiamento (tabela price)">
+            <InputMoney label="Valor do bem"      value={alavValorBem} onChange={setAlavValorBem}/>
+            <InputMoney label="Entrada"           value={alavEntrada}  onChange={setAlavEntrada}/>
+            <InputPct   label="CET anual"         value={alavCET}      onChange={setAlavCET} hint="Inclui juros, seguros e taxas"/>
+            <InputPct   label="TR anual"          value={alavTR}       onChange={setAlavTR} hint="Deixe 0 para veículo (CDC não tem TR)"/>
+            <InputInt   label="Prazo (meses)"     value={alavPrazoFin} onChange={setAlavPrazoFin} hint={`Financia ${brl(alavPrincipal)}`}/>
+          </InputPanel>
+          <InputPanel accentColor={C.cons} label="consórcio">
+            <InputMoney label="Carta de crédito"         value={alavCarta}     onChange={setAlavCarta}/>
+            <InputPct   label="Taxa de administração"    value={alavAdmin}     onChange={setAlavAdmin}/>
+            <InputPct   label="Fundo de reserva"         value={alavFundo}     onChange={setAlavFundo} hint="Típico 2%–4%"/>
+            <InputPct   label="Indexador anual"          value={alavIdx}       onChange={setAlavIdx}/>
+            <InputInt   label="Prazo (meses)"            value={alavPrazoCons} onChange={setAlavPrazoCons}/>
+            <InputInt   label="Mês de contemplação"      value={alavCmMes}     onChange={setAlavCmMes} hint="Estimativa — sem garantia de data"/>
+            <InputMoney label="Lance próprio"            value={alavLance}     onChange={setAlavLance} hint="O quanto menor, mais 'alavancado' — mais capital sobra investido"/>
+          </InputPanel>
+        </div>
+        {/* PAINEL DE CAPITAL / RESULTADO */}
+        <SectionTag>patrimônio total no mês da contemplação</SectionTag>
+        <AlavancagemPanel capitalTotal={alavCapitalTotal} onCapitalChange={setAlavCapitalTotal} taxaRend={alavRendCapital} onTaxaChange={setAlavRendCapital} cmSafe={alavCmSafe} itens={itensAlav} bemLabel="bem"/>
+        {/* NOTA ALAVANCAGEM */}
+        <div style={{background:"rgba(251,191,36,0.07)",border:"1px solid rgba(251,191,36,0.2)",borderRadius:10,padding:"12px 16px",fontSize:11,color:C.muted,lineHeight:1.7}}>
+          <span style={{color:"#fbbf24",fontWeight:600}}>// premissas · </span>
+          Modo dedicado à tese de "alavancagem de consórcio": usar menos capital no lance e manter o restante investido. Os campos aqui são independentes dos modos Imóvel e Veículo — ajuste-os para representar o seu cenário (ex: TR 0% e prazo mais curto para simular um veículo). A parcela mensal de cada modalidade é descontada do rendimento do capital investido (cenário conservador — não pressupõe renda extra disponível). Quando o capital investido fica negativo, ele seria "coberto" à mesma taxa de rendimento informada, o que é otimista frente ao custo real de crédito emergencial. O mês de contemplação é uma estimativa, sem garantia de data. Conteúdo educacional — não constitui recomendação de investimento.
         </div>
         </>)}
       </div>
