@@ -273,6 +273,7 @@ function calcConsorcio(carta,months,adminPct,fundoReservaPct,idxM,cm,lance,promo
 function calcCapitalAlavancado(capitalTotal,desembolsoMes0,rInvestM,parcelasPorMes,meses,desembolsoExtra=0,mesDesembolsoExtra=null) {
   let bal=Math.max(capitalTotal,0)-Math.max(desembolsoMes0,0);
   let mesInsuficiente=null;
+  let aporteRendaTotal=0;
   const rows=[];
   for(let m=1;m<=meses;m++){
     const balInicio=bal;
@@ -284,11 +285,22 @@ function calcCapitalAlavancado(capitalTotal,desembolsoMes0,rInvestM,parcelasPorM
     const rendimento=bal*rInvestM;
     bal+=rendimento;
     const parcela=parcelasPorMes[m-1]||0;
-    bal-=parcela;
-    if(bal<0&&mesInsuficiente===null) mesInsuficiente=m;
-    rows.push({month:m,balInicio,rendimento,parcela,lanceAplicado,bal});
+    // Quando o capital investido (já rendido) não cobre a parcela, o que falta
+    // não vira "dívida" acumulando juros sobre o próprio capital — é dinheiro
+    // que sai da renda mensal da pessoa para completar o pagamento. O capital
+    // investido nunca fica negativo: ele só zera e para de contribuir.
+    let aporteRenda=0;
+    let balAposParcela=bal-parcela;
+    if(balAposParcela<0){
+      aporteRenda=-balAposParcela;
+      balAposParcela=0;
+    }
+    bal=balAposParcela;
+    aporteRendaTotal+=aporteRenda;
+    if(aporteRenda>0&&mesInsuficiente===null) mesInsuficiente=m;
+    rows.push({month:m,balInicio,rendimento,parcela,lanceAplicado,aporteRenda,bal});
   }
-  return {rows,final:bal,mesInsuficiente};
+  return {rows,final:bal,mesInsuficiente,aporteRendaTotal};
 }
 // ─── INPUTS ───────────────────────────────────────────────────────────────────
 const iBase={width:"100%",marginTop:5,padding:"10px 12px",border:`1px solid ${C.borderMid}`,borderRadius:7,fontSize:14,background:C.panel2,boxSizing:"border-box",color:C.text,outline:"none",fontFamily:F.body,transition:"border-color 0.15s"};
@@ -1069,7 +1081,7 @@ function AlavancagemPanel({capitalTotal,onCapitalChange,taxaRend,onTaxaChange,cm
       </div>
       <div style={{padding:20}}>
         <div style={{fontSize:11,color:C.muted,fontFamily:F.body,lineHeight:1.6,marginBottom:16}}>
-          Simula usar só o valor de entrada/lance de cada modalidade e manter o restante do seu capital investido, rendendo à taxa abaixo — com a parcela mensal descontada desse rendimento. O consórcio aplica o lance no mês {cmSafe}, quando contemplaria; as demais seguem pagando parcela normalmente. Compara o patrimônio total (bem − dívida + capital que sobrou) no mês {horizonte}, final do prazo mais longo entre as modalidades.
+          Simula usar só o valor de entrada/lance de cada modalidade e manter o restante do seu capital investido, rendendo à taxa abaixo — com a parcela mensal descontada desse rendimento. O consórcio aplica o lance no mês {cmSafe}, quando contemplaria; as demais seguem pagando parcela normalmente. Quando o rendimento não é suficiente para cobrir a parcela, o capital investido para em zero (não fica negativo) e a diferença é considerada como vindo da sua renda mensal, não de um empréstimo. Compara o patrimônio total (bem − dívida + capital que sobrou) no mês {horizonte}, final do prazo mais longo entre as modalidades.
         </div>
         <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:12,marginBottom:18}}>
           <InputMoney label="Capital total disponível" value={capitalTotal} onChange={onCapitalChange} hint="Quanto você tem em caixa hoje para essa decisão"/>
@@ -1082,6 +1094,7 @@ function AlavancagemPanel({capitalTotal,onCapitalChange,taxaRend,onTaxaChange,cm
                 <th style={{...thS,textAlign:"left"}}>Modalidade</th>
                 <th style={thS}>Desembolso imediato</th>
                 <th style={thS}>Capital ainda investido (mês {horizonte})</th>
+                <th style={thS}>Aporte de renda (total)</th>
                 <th style={thS}>Saldo devedor (mês {horizonte})</th>
                 <th style={thS}>Patrimônio do {bemLabel}</th>
                 <th style={thS}>Patrimônio total</th>
@@ -1094,7 +1107,8 @@ function AlavancagemPanel({capitalTotal,onCapitalChange,taxaRend,onTaxaChange,cm
                   <tr key={it.label} style={{background:i%2===0?C.panel:C.panel2}}>
                     <td style={{...tdL,fontWeight:600,color:it.color}}>{it.label}</td>
                     <td style={tdC()}>{brl(it.desembolso)}</td>
-                    <td style={tdC(false,it.capitalFinal<0?"#f87171":C.text)}>{brl(it.capitalFinal)}</td>
+                    <td style={tdC()}>{brl(it.capitalFinal)}</td>
+                    <td style={tdC(it.aporteRendaTotal>0,it.aporteRendaTotal>0?"#fbbf24":C.borderMid)}>{it.aporteRendaTotal>0?brl(it.aporteRendaTotal):"—"}</td>
                     <td style={tdC()}>{brl(it.saldoDevedor)}</td>
                     <td style={tdC()}>{brl(it.valorAtivo)}</td>
                     <td style={tdC(isMax,isMax?C.accent:C.text,isMax)}>{brl(it.patrimonioTotal)}{isMax&&" ✓"}</td>
@@ -1106,7 +1120,7 @@ function AlavancagemPanel({capitalTotal,onCapitalChange,taxaRend,onTaxaChange,cm
         </div>
         {algumInsuficiente&&(
           <div style={{marginTop:12,fontSize:11,color:"#fbbf24",fontFamily:F.body,lineHeight:1.6,background:"rgba(251,191,36,0.07)",border:"1px solid rgba(251,191,36,0.2)",borderRadius:8,padding:"10px 14px"}}>
-            ⚠ {itens.filter(i=>i.mesInsuficiente!=null).map(i=>`${i.label} (a partir do mês ${i.mesInsuficiente})`).join(", ")}: o rendimento do capital não foi suficiente para cobrir a parcela em algum momento — a partir daí, o capital investido passa a ser consumido (ficando negativo), o que na prática exigiria aporte extra de renda.
+            ⚠ {itens.filter(i=>i.mesInsuficiente!=null).map(i=>`${i.label} (a partir do mês ${i.mesInsuficiente}, total de ${brl(i.aporteRendaTotal)})`).join(", ")}: o rendimento do capital não foi suficiente para cobrir a parcela em algum momento — a partir daí, o capital investido zera e a diferença passa a sair da sua renda mensal, não de um empréstimo.
           </div>
         )}
       </div>
@@ -1134,7 +1148,7 @@ function FluxoCapitalDetalhado({itens,cmSafe,horizonte}) {
         <div style={{display:"flex",alignItems:"center",gap:10,flexWrap:"wrap"}}>
           <span style={{fontSize:13,fontWeight:600,color:C.text}}>//</span>
           <span style={{fontSize:13,fontWeight:600,color:C.text}}>Fluxo do capital investido, mês a mês</span>
-          <span style={{fontSize:11,color:C.muted}}>Rendimento − parcela (− lance na contemplação) = capital que sobra</span>
+          <span style={{fontSize:11,color:C.muted}}>Rendimento − parcela (− lance na contemplação) = capital que sobra · quando falta, o capital para em zero e a diferença vira aporte de renda</span>
         </div>
         <span style={{fontSize:16,color:C.muted,transition:"transform 0.2s",transform:open?"rotate(180deg)":"rotate(0deg)"}}>▾</span>
       </button>
@@ -1165,6 +1179,7 @@ function FluxoCapitalDetalhado({itens,cmSafe,horizonte}) {
                   <th style={{...thS,color:C.accent}}>Rendimento</th>
                   <th style={{...thS,color:item?.color}}>Parcela paga</th>
                   <th style={{...thS,color:"#f87171"}}>Lance na contemplação</th>
+                  <th style={{...thS,color:"#fbbf24"}}>Aporte de renda</th>
                   <th style={thS}>Capital no fim do mês</th>
                 </tr>
               </thead>
@@ -1176,7 +1191,8 @@ function FluxoCapitalDetalhado({itens,cmSafe,horizonte}) {
                     <td style={tdC(false,C.accent)}>{brl(r.rendimento)}</td>
                     <td style={tdC(true,item?.color)}>{brl(r.parcela)}</td>
                     <td style={tdC(r.lanceAplicado>0,r.lanceAplicado>0?"#f87171":C.borderMid)}>{r.lanceAplicado>0?brl(r.lanceAplicado):"—"}</td>
-                    <td style={tdC(true,r.bal<0?"#f87171":C.text)}>{brl(r.bal)}</td>
+                    <td style={tdC(r.aporteRenda>0,r.aporteRenda>0?"#fbbf24":C.borderMid)}>{r.aporteRenda>0?brl(r.aporteRenda):"—"}</td>
+                    <td style={tdC(true,C.text)}>{brl(r.bal)}</td>
                   </tr>
                 ))}
               </tbody>
@@ -1299,9 +1315,9 @@ export default function App() {
   // passa de alavHorizonte, por construção) a dívida do grupo já está quitada.
   const alavSaldoConsFinal=0;
   const itensAlav=[
-    {label:"SAC",color:C.sac,desembolso:alavEntrada,capitalFinal:alavCapSac.final,mesInsuficiente:alavCapSac.mesInsuficiente,saldoDevedor:alavSaldoSacFinal,valorAtivo:Math.max(alavValorBem-alavSaldoSacFinal,0),patrimonioTotal:Math.max(alavValorBem-alavSaldoSacFinal,0)+alavCapSac.final,capRows:alavCapSac.rows},
-    {label:"Price",color:C.price,desembolso:alavEntrada,capitalFinal:alavCapPrice.final,mesInsuficiente:alavCapPrice.mesInsuficiente,saldoDevedor:alavSaldoPriceFinal,valorAtivo:Math.max(alavValorBem-alavSaldoPriceFinal,0),patrimonioTotal:Math.max(alavValorBem-alavSaldoPriceFinal,0)+alavCapPrice.final,capRows:alavCapPrice.rows},
-    {label:"Consórcio",color:C.cons,desembolso:act.lanceEfetivo||0,capitalFinal:alavCapCons.final,mesInsuficiente:alavCapCons.mesInsuficiente,saldoDevedor:alavSaldoConsFinal,valorAtivo:Math.max((act.cartaTravada||0)-alavSaldoConsFinal,0),patrimonioTotal:Math.max((act.cartaTravada||0)-alavSaldoConsFinal,0)+alavCapCons.final,capRows:alavCapCons.rows},
+    {label:"SAC",color:C.sac,desembolso:alavEntrada,capitalFinal:alavCapSac.final,mesInsuficiente:alavCapSac.mesInsuficiente,aporteRendaTotal:alavCapSac.aporteRendaTotal,saldoDevedor:alavSaldoSacFinal,valorAtivo:Math.max(alavValorBem-alavSaldoSacFinal,0),patrimonioTotal:Math.max(alavValorBem-alavSaldoSacFinal,0)+alavCapSac.final,capRows:alavCapSac.rows},
+    {label:"Price",color:C.price,desembolso:alavEntrada,capitalFinal:alavCapPrice.final,mesInsuficiente:alavCapPrice.mesInsuficiente,aporteRendaTotal:alavCapPrice.aporteRendaTotal,saldoDevedor:alavSaldoPriceFinal,valorAtivo:Math.max(alavValorBem-alavSaldoPriceFinal,0),patrimonioTotal:Math.max(alavValorBem-alavSaldoPriceFinal,0)+alavCapPrice.final,capRows:alavCapPrice.rows},
+    {label:"Consórcio",color:C.cons,desembolso:act.lanceEfetivo||0,capitalFinal:alavCapCons.final,mesInsuficiente:alavCapCons.mesInsuficiente,aporteRendaTotal:alavCapCons.aporteRendaTotal,saldoDevedor:alavSaldoConsFinal,valorAtivo:Math.max((act.cartaTravada||0)-alavSaldoConsFinal,0),patrimonioTotal:Math.max((act.cartaTravada||0)-alavSaldoConsFinal,0)+alavCapCons.final,capRows:alavCapCons.rows},
   ];
   const sacTotal=(st.totalPaid||0)+entrada+fgts;
   const priceTotal=(pt.totalPaid||0)+entrada+fgts;
@@ -1718,7 +1734,7 @@ export default function App() {
         {/* NOTA ALAVANCAGEM */}
         <div style={{background:"rgba(251,191,36,0.07)",border:"1px solid rgba(251,191,36,0.2)",borderRadius:10,padding:"12px 16px",fontSize:11,color:C.muted,lineHeight:1.7}}>
           <span style={{color:"#fbbf24",fontWeight:600}}>// premissas · </span>
-          Modo dedicado à tese de "alavancagem de consórcio": usar menos capital no lance e manter o restante investido. Os campos aqui são independentes dos modos Imóvel e Veículo — ajuste-os para representar o seu cenário. Para simular um veículo, deixe a TR anual em 0% (CDC de veículo não tem TR — é SAC/Price puro); SAC não é praticado comercialmente em financiamento de veículo, mas o simulador calcula do mesmo jeito caso queira comparar. A parcela mensal de cada modalidade é descontada do rendimento do capital investido (cenário conservador — não pressupõe renda extra disponível). A comparação roda até o fim do prazo mais longo entre as modalidades (não para na contemplação) — o capital de quem já quitou continua rendendo até lá, e o consórcio aplica o lance no mês da contemplação e é tratado como quitado ao final do próprio prazo. Quando o capital investido fica negativo, ele seria "coberto" à mesma taxa de rendimento informada, o que é otimista frente ao custo real de crédito emergencial. O mês de contemplação é uma estimativa, sem garantia de data. Conteúdo educacional — não constitui recomendação de investimento.
+          Modo dedicado à tese de "alavancagem de consórcio": usar menos capital no lance e manter o restante investido. Os campos aqui são independentes dos modos Imóvel e Veículo — ajuste-os para representar o seu cenário. Para simular um veículo, deixe a TR anual em 0% (CDC de veículo não tem TR — é SAC/Price puro); SAC não é praticado comercialmente em financiamento de veículo, mas o simulador calcula do mesmo jeito caso queira comparar. A parcela mensal de cada modalidade é descontada do rendimento do capital investido. A comparação roda até o fim do prazo mais longo entre as modalidades (não para na contemplação) — o capital de quem já quitou continua rendendo até lá, e o consórcio aplica o lance no mês da contemplação e é tratado como quitado ao final do próprio prazo. Quando o rendimento não cobre a parcela, o capital investido para em zero (não vira dívida rendendo a mesma taxa) e a diferença é contabilizada como "aporte de renda" — dinheiro que sairia do seu orçamento mensal normal, e não de um empréstimo. O mês de contemplação é uma estimativa, sem garantia de data. Conteúdo educacional — não constitui recomendação de investimento.
         </div>
         </>)}
       </div>
