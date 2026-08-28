@@ -1061,6 +1061,66 @@ function CustosDetalhadosVeiculo({ft,vct,finTotal,consTotal,principal,entrada,io
     </div>
   );
 }
+// ─── ALAVANCAGEM: CUSTO TOTAL DE CADA MODALIDADE ──────────────────────────────
+// A pergunta mais direta antes de qualquer conta de capital investido: quanto
+// cada forma de crédito custa, do início ao fim? SAC/Price cobram juros +
+// correção (TR); consórcio cobra administração + fundo de reserva + correção
+// do índice — sem juros. Aqui isso fica separado do resto da análise.
+function CustoTotalAlavancagem({itens,bemLabel}) {
+  const thS={padding:"9px 12px",fontSize:10,fontWeight:600,textAlign:"center",color:C.muted,borderBottom:`1px solid ${C.border}`,background:C.panel2,fontFamily:F.body,textTransform:"uppercase",letterSpacing:"0.06em",whiteSpace:"nowrap"};
+  const tdL={padding:"9px 12px",fontSize:12,color:C.text,borderBottom:`1px solid ${C.border}`,fontFamily:F.body};
+  const tdC=(bold,color)=>({padding:"9px 12px",fontSize:12,textAlign:"center",borderBottom:`1px solid ${C.border}`,fontFamily:F.body,fontWeight:bold?700:400,color:color||C.text,whiteSpace:"nowrap"});
+  const comprados=itens.filter(i=>!i.naoComprou);
+  const minCustoPct=comprados.length?Math.min(...comprados.map(i=>i.custoPct)):0;
+  return (
+    <div style={{background:C.panel,borderRadius:10,border:`1px solid ${C.border}`,overflow:"hidden",marginBottom:16}}>
+      <div style={{background:C.panel2,borderBottom:`1px solid ${C.border}`,padding:"12px 20px",display:"flex",alignItems:"center",gap:10}}>
+        <div style={{width:3,height:18,borderRadius:2,background:C.accent,flexShrink:0}}/>
+        <span style={{fontFamily:F.body,fontSize:13,fontWeight:600,color:C.text,letterSpacing:"0.03em"}}>custo total de cada modalidade</span>
+      </div>
+      <div style={{padding:20}}>
+        <div style={{fontSize:11,color:C.muted,fontFamily:F.body,lineHeight:1.6,marginBottom:16}}>
+          Quanto você paga, no total, além do valor do {bemLabel}, do início ao fim do prazo — entrada/lance + todas as parcelas, menos o valor do {bemLabel}. "Aplicação pura" não compra nada, então não tem custo de crédito.
+        </div>
+        <div style={{overflowX:"auto"}}>
+          <table cellPadding="0" style={{borderCollapse:"separate",borderSpacing:0,width:"100%",minWidth:640}}>
+            <thead>
+              <tr>
+                <th style={{...thS,textAlign:"left"}}>Modalidade</th>
+                <th style={thS}>Entrada/lance</th>
+                <th style={thS}>Parcelas pagas (soma)</th>
+                <th style={thS}>Juros/Adm.+fundo+correção</th>
+                <th style={thS}>Total pago</th>
+                <th style={thS}>Custo total (acima do {bemLabel})</th>
+                <th style={thS}>% acima do {bemLabel}</th>
+              </tr>
+            </thead>
+            <tbody>
+              {itens.map((it,i)=>{
+                const isMin=!it.naoComprou&&it.custoPct===minCustoPct;
+                return (
+                  <tr key={it.label} style={{background:i%2===0?C.panel:C.panel2}}>
+                    <td style={{...tdL,fontWeight:600,color:it.color}}>{it.label}</td>
+                    {it.naoComprou?(
+                      <td colSpan={6} style={{...tdC(false,C.borderMid),textAlign:"center"}}>não compra o {bemLabel} — sem custo de crédito</td>
+                    ):(<>
+                      <td style={tdC()}>{brl(it.desembolso)}</td>
+                      <td style={tdC()}>{brl(it.totalParcelas)}</td>
+                      <td style={tdC(false,"#fbbf24")}>{brl(it.custoCredito)} <span style={{color:C.muted,fontWeight:400}}>({it.custoCreditoLabel})</span></td>
+                      <td style={tdC(true)}>{brl(it.totalPago)}</td>
+                      <td style={tdC(isMin,isMin?C.accent:"#f87171")}>{brl(it.custoTotal)}</td>
+                      <td style={tdC(isMin,isMin?C.accent:"#f87171")}>{it.custoPct.toFixed(1)}%{isMin&&" ✓"}</td>
+                    </>)}
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+  );
+}
 // ─── CUSTO DE OPORTUNIDADE / ALAVANCAGEM ──────────────────────────────────────
 // Compara, ao final do prazo mais longo entre as modalidades, o patrimônio
 // líquido total de cada uma: (valor do bem − saldo devedor nesse mês) + o que
@@ -1330,10 +1390,14 @@ export default function App() {
   // "invisível" — senão duas modalidades que precisaram de aportes bem
   // diferentes aparecem empatadas só porque ambas zeraram o capital investido.
   const itensAlav=[
-    {label:"Aplicação pura",color:C.aplic,desembolso:0,capitalFinal:alavCapAplic.final,mesInsuficiente:alavCapAplic.mesInsuficiente,aporteRendaTotal:alavCapAplic.aporteRendaTotal,saldoDevedor:0,valorAtivo:0,patrimonioTotal:alavCapAplic.final-alavCapAplic.aporteRendaTotal,capRows:alavCapAplic.rows},
-    {label:"SAC",color:C.sac,desembolso:alavEntrada,capitalFinal:alavCapSac.final,mesInsuficiente:alavCapSac.mesInsuficiente,aporteRendaTotal:alavCapSac.aporteRendaTotal,saldoDevedor:alavSaldoSacFinal,valorAtivo:Math.max(alavValorBem-alavSaldoSacFinal,0),patrimonioTotal:Math.max(alavValorBem-alavSaldoSacFinal,0)+alavCapSac.final-alavCapSac.aporteRendaTotal,capRows:alavCapSac.rows},
-    {label:"Price",color:C.price,desembolso:alavEntrada,capitalFinal:alavCapPrice.final,mesInsuficiente:alavCapPrice.mesInsuficiente,aporteRendaTotal:alavCapPrice.aporteRendaTotal,saldoDevedor:alavSaldoPriceFinal,valorAtivo:Math.max(alavValorBem-alavSaldoPriceFinal,0),patrimonioTotal:Math.max(alavValorBem-alavSaldoPriceFinal,0)+alavCapPrice.final-alavCapPrice.aporteRendaTotal,capRows:alavCapPrice.rows},
-    {label:"Consórcio",color:C.cons,desembolso:act.lanceEfetivo||0,capitalFinal:alavCapCons.final,mesInsuficiente:alavCapCons.mesInsuficiente,aporteRendaTotal:alavCapCons.aporteRendaTotal,saldoDevedor:alavSaldoConsFinal,valorAtivo:Math.max((act.cartaTravada||0)-alavSaldoConsFinal,0),patrimonioTotal:Math.max((act.cartaTravada||0)-alavSaldoConsFinal,0)+alavCapCons.final-alavCapCons.aporteRendaTotal,capRows:alavCapCons.rows},
+    {label:"Aplicação pura",color:C.aplic,desembolso:0,capitalFinal:alavCapAplic.final,mesInsuficiente:alavCapAplic.mesInsuficiente,aporteRendaTotal:alavCapAplic.aporteRendaTotal,saldoDevedor:0,valorAtivo:0,patrimonioTotal:alavCapAplic.final-alavCapAplic.aporteRendaTotal,capRows:alavCapAplic.rows,
+      naoComprou:true,totalParcelas:0,custoCreditoLabel:null,custoCredito:0,totalPago:0,custoTotal:0,custoPct:0},
+    {label:"SAC",color:C.sac,desembolso:alavEntrada,capitalFinal:alavCapSac.final,mesInsuficiente:alavCapSac.mesInsuficiente,aporteRendaTotal:alavCapSac.aporteRendaTotal,saldoDevedor:alavSaldoSacFinal,valorAtivo:Math.max(alavValorBem-alavSaldoSacFinal,0),patrimonioTotal:Math.max(alavValorBem-alavSaldoSacFinal,0)+alavCapSac.final-alavCapSac.aporteRendaTotal,capRows:alavCapSac.rows,
+      naoComprou:false,totalParcelas:ast.totalPaid||0,custoCreditoLabel:"Juros + TR",custoCredito:(ast.totalInterest||0)+(ast.totalTR||0),totalPago:alavEntrada+(ast.totalPaid||0),custoTotal:alavEntrada+(ast.totalPaid||0)-alavValorBem,custoPct:alavValorBem>0?((alavEntrada+(ast.totalPaid||0)-alavValorBem)/alavValorBem)*100:0},
+    {label:"Price",color:C.price,desembolso:alavEntrada,capitalFinal:alavCapPrice.final,mesInsuficiente:alavCapPrice.mesInsuficiente,aporteRendaTotal:alavCapPrice.aporteRendaTotal,saldoDevedor:alavSaldoPriceFinal,valorAtivo:Math.max(alavValorBem-alavSaldoPriceFinal,0),patrimonioTotal:Math.max(alavValorBem-alavSaldoPriceFinal,0)+alavCapPrice.final-alavCapPrice.aporteRendaTotal,capRows:alavCapPrice.rows,
+      naoComprou:false,totalParcelas:apt.totalPaid||0,custoCreditoLabel:"Juros + TR",custoCredito:(apt.totalInterest||0)+(apt.totalTR||0),totalPago:alavEntrada+(apt.totalPaid||0),custoTotal:alavEntrada+(apt.totalPaid||0)-alavValorBem,custoPct:alavValorBem>0?((alavEntrada+(apt.totalPaid||0)-alavValorBem)/alavValorBem)*100:0},
+    {label:"Consórcio",color:C.cons,desembolso:act.lanceEfetivo||0,capitalFinal:alavCapCons.final,mesInsuficiente:alavCapCons.mesInsuficiente,aporteRendaTotal:alavCapCons.aporteRendaTotal,saldoDevedor:alavSaldoConsFinal,valorAtivo:Math.max((act.cartaTravada||0)-alavSaldoConsFinal,0),patrimonioTotal:Math.max((act.cartaTravada||0)-alavSaldoConsFinal,0)+alavCapCons.final-alavCapCons.aporteRendaTotal,capRows:alavCapCons.rows,
+      naoComprou:false,totalParcelas:act.totalPaid||0,custoCreditoLabel:"Adm. + fundo + correção",custoCredito:(act.totalAdm||0)+(act.totalFundo||0)+(act.totalIdxPre||0)+(act.totalIdxPos||0),totalPago:(act.lanceEfetivo||0)+(act.totalPaid||0),custoTotal:(act.lanceEfetivo||0)+(act.totalPaid||0)-(act.cartaTravada||0),custoPct:(act.cartaTravada||0)>0?(((act.lanceEfetivo||0)+(act.totalPaid||0)-(act.cartaTravada||0))/(act.cartaTravada||0))*100:0},
   ];
   // ── sensibilidade ao mês da contemplação ────────────────────────────────
   // Você não escolhe o mês em que é sorteado/contemplado — é um fator de sorte,
@@ -1766,6 +1830,9 @@ export default function App() {
             <InputMoney label="Lance próprio"            value={alavLance}     onChange={setAlavLance} hint="O quanto menor, mais 'alavancado' — mais capital sobra investido"/>
           </InputPanel>
         </div>
+        {/* CUSTO TOTAL */}
+        <SectionTag>custo total do crédito</SectionTag>
+        <CustoTotalAlavancagem itens={itensAlav} bemLabel="bem"/>
         {/* PAINEL DE CAPITAL / RESULTADO */}
         <SectionTag>patrimônio total ao final do prazo</SectionTag>
         <AlavancagemPanel capitalTotal={alavCapitalTotal} onCapitalChange={setAlavCapitalTotal} taxaRend={alavRendCapital} onTaxaChange={setAlavRendCapital} cmSafe={alavCmSafe} horizonte={alavHorizonte} itens={itensAlav} bemLabel="bem"/>
