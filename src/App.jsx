@@ -303,6 +303,16 @@ function calcCapitalAlavancado(capitalTotal,desembolsoMes0,rInvestM,parcelasPorM
   }
   return {rows,final:bal,mesInsuficiente,aporteRendaTotal};
 }
+// ─── CALC: VALOR PRESENTE ──────────────────────────────────────────────────────
+// Desconta um fluxo de parcelas mensais por uma taxa mensal (tipicamente o
+// mesmo indexador de inflação/correção já usado no consórcio), pra comparar o
+// custo real de SAC, Price e Consórcio sem o viés de quando cada um paga mais
+// ou menos ao longo do tempo. O mês 1 é descontado por (1+disc)^1 — a entrada
+// (paga no ato, mês 0) não é descontada, então é somada separadamente por
+// quem chama esta função.
+function calcValorPresente(rows,discM,extraKey=null) {
+  return rows.reduce((vp,r,i)=>vp+((r.installment||0)+(extraKey?(r[extraKey]||0):0))/Math.pow(1+discM,i+1),0);
+}
 // ─── INPUTS ───────────────────────────────────────────────────────────────────
 const iBase={width:"100%",marginTop:5,padding:"10px 12px",border:`1px solid ${C.borderMid}`,borderRadius:7,fontSize:14,background:C.panel2,boxSizing:"border-box",color:C.text,outline:"none",fontFamily:F.body,transition:"border-color 0.15s"};
 function InputMoney({label,value,onChange,hint}) {
@@ -641,7 +651,7 @@ function FluxoCaixa({sac,price,cons,cmSafe,entrada,fgts,lance,aluguelPorMes,sacA
   );
 }
 // ─── CUSTOS DETALHADOS ────────────────────────────────────────────────────────
-function CustosDetalhados({st,pt,ct,sacTotal,priceTotal,consTotal,principal,entrada,fgts,aluguelTotal,cmSafe,amortAtiva}) {
+function CustosDetalhados({st,pt,ct,sacTotal,priceTotal,consTotal,sacVP,priceVP,consVP,idxAnual,principal,entrada,fgts,aluguelTotal,cmSafe,amortAtiva}) {
   const [open,setOpen]=useState(false);
   const thS={padding:"9px 16px",fontSize:10,fontWeight:600,textAlign:"center",color:C.muted,borderBottom:`1px solid ${C.border}`,background:C.panel2,fontFamily:F.body,textTransform:"uppercase",letterSpacing:"0.07em"};
   const renderVal=(v,color,hlMin,minV)=>{
@@ -718,6 +728,24 @@ function CustosDetalhados({st,pt,ct,sacTotal,priceTotal,consTotal,principal,entr
                     </td>
                     {vals.map((v,i)=>(
                       <td key={i} style={{padding:"12px 16px",fontSize:13,textAlign:"center",fontWeight:v===minV?700:500,color:v===minV?colors[i]:C.text,background:v===minV?C.accentHl:C.accentBg,borderTop:`1px solid ${C.borderMid}`,whiteSpace:"nowrap",fontFamily:F.body}}>
+                        {brl(v)}
+                      </td>
+                    ))}
+                  </tr>
+                );
+              })()}
+              {(()=>{
+                const vals=[sacVP,priceVP,consVP];
+                const minV=Math.min(...vals);
+                const colors=[C.sac,C.price,C.cons];
+                return (
+                  <tr style={{background:C.panel2}}>
+                    <td style={{padding:"12px 16px",fontSize:12,fontWeight:600,color:C.muted,fontFamily:F.body}}>
+                      Desembolso a valor presente
+                      <div style={{fontSize:10,color:C.muted,fontWeight:400,marginTop:1}}>Descontado a {fmtPct(idxAnual)} a.a. (mesmo indexador do consórcio) — custo em poder de compra de hoje</div>
+                    </td>
+                    {vals.map((v,i)=>(
+                      <td key={i} style={{padding:"12px 16px",fontSize:12,textAlign:"center",fontWeight:v===minV?700:500,color:v===minV?colors[i]:C.muted,whiteSpace:"nowrap",fontFamily:F.body}}>
                         {brl(v)}
                       </td>
                     ))}
@@ -975,7 +1003,7 @@ function FluxoCaixaVeiculo({fin,cons,cmSafe,entrada,lance}) {
   );
 }
 // ─── VEÍCULO: CUSTOS DETALHADOS (2 vias) ──────────────────────────────────────
-function CustosDetalhadosVeiculo({ft,vct,finTotal,consTotal,principal,entrada,iof,cmSafe}) {
+function CustosDetalhadosVeiculo({ft,vct,finTotal,consTotal,finVP,consVP,idxAnual,principal,entrada,iof,cmSafe}) {
   const [open,setOpen]=useState(false);
   const thS={padding:"9px 16px",fontSize:10,fontWeight:600,textAlign:"center",color:C.muted,borderBottom:`1px solid ${C.border}`,background:C.panel2,fontFamily:F.body,textTransform:"uppercase",letterSpacing:"0.07em"};
   const renderVal=(v,color,hlMin,minV)=>{
@@ -1048,6 +1076,24 @@ function CustosDetalhadosVeiculo({ft,vct,finTotal,consTotal,principal,entrada,io
                     </td>
                     {vals.map((v,i)=>(
                       <td key={i} style={{padding:"12px 16px",fontSize:13,textAlign:"center",fontWeight:v===minV?700:500,color:v===minV?colors[i]:C.text,background:v===minV?C.accentHl:C.accentBg,borderTop:`1px solid ${C.borderMid}`,whiteSpace:"nowrap",fontFamily:F.body}}>
+                        {brl(v)}
+                      </td>
+                    ))}
+                  </tr>
+                );
+              })()}
+              {(()=>{
+                const vals=[finVP,consVP];
+                const minV=Math.min(...vals);
+                const colors=[C.sac,C.cons];
+                return (
+                  <tr style={{background:C.panel2}}>
+                    <td style={{padding:"12px 16px",fontSize:12,fontWeight:600,color:C.muted,fontFamily:F.body}}>
+                      Desembolso a valor presente
+                      <div style={{fontSize:10,color:C.muted,fontWeight:400,marginTop:1}}>Descontado a {fmtPct(idxAnual)} a.a. (mesmo indexador do consórcio) — custo em poder de compra de hoje</div>
+                    </td>
+                    {vals.map((v,i)=>(
+                      <td key={i} style={{padding:"12px 16px",fontSize:12,textAlign:"center",fontWeight:v===minV?700:500,color:v===minV?colors[i]:C.muted,whiteSpace:"nowrap",fontFamily:F.body}}>
                         {brl(v)}
                       </td>
                     ))}
@@ -1351,6 +1397,9 @@ export default function App() {
   const ft=veicFin.totals,vct=veicCons.totals;
   const veicFinTotal=(ft.totalPaid||0)+veicEntrada;
   const veicConsTotal=vct.totalPaid||0;
+  // valor presente: mesmo indexador do consórcio de veículo usado como desconto.
+  const veicFinVP=veicEntrada+calcValorPresente(veicFin.rows,veicIdxM);
+  const veicConsVP=calcValorPresente(veicCons.rows,veicIdxM);
   const veicMaxM=Math.min(Math.max(veicFin.rows.length,veicCons.rows.length),240);
   // ── alavancagem: derivados (modo próprio, campos próprios) ─────────────────
   // Comparação restrita a Aplicação pura vs Consórcio — as duas únicas opções
@@ -1412,6 +1461,15 @@ export default function App() {
   const sacTotal=(st.totalPaid||0)+entrada+fgts;
   const priceTotal=(pt.totalPaid||0)+entrada+fgts;
   const consTotal=(ct.totalPaid||0)+aluguelTotal;
+  // ── valor presente: desconta o fluxo de parcelas pelo mesmo indexador anual
+  // já usado na correção do consórcio, pra comparar o custo real (poder de
+  // compra de hoje) sem o viés de SAC pesar mais no início e Price ser fixo.
+  const sacRowsAtivos=(amortAtiva&&sacAmort)?sacAmort.rows:sac.rows;
+  const priceRowsAtivos=(amortAtiva&&priceAmort)?priceAmort.rows:price.rows;
+  const sacVP=entrada+fgts+calcValorPresente(sacRowsAtivos,idxM,amortAtiva?"amortExtra":null);
+  const priceVP=entrada+fgts+calcValorPresente(priceRowsAtivos,idxM,amortAtiva?"amortExtra":null);
+  const aluguelVP=aluguelPorMes.reduce((a,v,i)=>a+v/Math.pow(1+idxM,i+1),0);
+  const consVP=calcValorPresente(cons.rows,idxM)+aluguelVP;
   const maxM=Math.min(Math.max(sac.rows.length,price.rows.length,cons.rows.length),360);
   const [visibleLines,setVisibleLines]=useState({SAC:true,Price:true,"Consórcio":true,"SAC+":true,"Price+":true});
   const toggleLine=(name)=>setVisibleLines(v=>({...v,[name]:!v[name]}));
@@ -1617,7 +1675,7 @@ export default function App() {
           })}
         </div>
         {/* CUSTOS DETALHADOS */}
-        <CustosDetalhados st={st} pt={pt} ct={ct} sacTotal={sacTotal} priceTotal={priceTotal} consTotal={consTotal} principal={principal} entrada={entrada} fgts={fgts} aluguelTotal={aluguelTotal} cmSafe={cmSafe} amortAtiva={amortAtiva}/>
+        <CustosDetalhados st={st} pt={pt} ct={ct} sacTotal={sacTotal} priceTotal={priceTotal} consTotal={consTotal} sacVP={sacVP} priceVP={priceVP} consVP={consVP} idxAnual={idxAnual} principal={principal} entrada={entrada} fgts={fgts} aluguelTotal={aluguelTotal} cmSafe={cmSafe} amortAtiva={amortAtiva}/>
         {/* GRÁFICOS */}
         <SectionTag>evolução ao longo do tempo</SectionTag>
         <ChartCard title="// parcela mensal" subtitle="Evolução mês a mês de cada modalidade. Clique na legenda para ocultar uma linha.">
@@ -1742,7 +1800,7 @@ export default function App() {
           })}
         </div>
         {/* CUSTOS DETALHADOS VEÍCULO */}
-        <CustosDetalhadosVeiculo ft={ft} vct={vct} finTotal={veicFinTotal} consTotal={veicConsTotal} principal={veicPrincipal} entrada={veicEntrada} iof={veicIofSafe} cmSafe={veicCmSafe}/>
+        <CustosDetalhadosVeiculo ft={ft} vct={vct} finTotal={veicFinTotal} consTotal={veicConsTotal} finVP={veicFinVP} consVP={veicConsVP} idxAnual={veicIdx} principal={veicPrincipal} entrada={veicEntrada} iof={veicIofSafe} cmSafe={veicCmSafe}/>
         {/* GRÁFICOS VEÍCULO */}
         <SectionTag>evolução ao longo do tempo</SectionTag>
         <ChartCard title="// parcela mensal" subtitle="Evolução mês a mês de cada modalidade.">
