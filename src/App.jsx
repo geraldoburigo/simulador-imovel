@@ -64,38 +64,45 @@ const fmtPct = (v) => `${(Number(v)||0).toLocaleString("pt-BR",{minimumFractionD
 const annualToMonthly = (a) => (1+(Number(a)||0)/100)**(1/12)-1;
 const pmtFn = (pv,r,n) => { if(n<=0)return 0; if(Math.abs(r)<1e-12)return pv/n; return pv*(r*(1+r)**n)/((1+r)**n-1); };
 // ─── CALC: SAC ────────────────────────────────────────────────────────────────
-function calcSac(principal,rM,trM,months) {
+// `seguroPctM` e `admFixoMes` são opcionais (default 0 → comportamento idêntico ao
+// anterior). `seguroPctM` é uma taxa MENSAL direta (não anualizada) sobre o saldo
+// devedor pós-TR, e `admFixoMes` é um valor fixo em R$ somado a cada parcela —
+// espelhando como a maioria dos contratos de financiamento cobra esses itens.
+function calcSac(principal,rM,trM,months,seguroPctM=0,admFixoMes=0) {
   if(principal<=0||months<=0) return {rows:[],totals:{}};
-  let bal=principal,cumInstall=0,cumInterest=0,cumTR=0,cumAmort=0;
+  let bal=principal,cumInstall=0,cumInterest=0,cumTR=0,cumAmort=0,cumSeguro=0,cumAdmFixo=0;
   const rows=Array.from({length:months},(_,i)=>{
     const remaining=months-i;
     const tr=bal*trM; bal+=tr;
     const amort=bal/remaining;
     const interest=bal*rM;
-    const installment=amort+interest;
+    const seguro=bal*seguroPctM;
+    const installment=amort+interest+seguro+admFixoMes;
     bal=Math.max(bal-amort,0);
-    cumInstall+=installment; cumInterest+=interest; cumTR+=tr; cumAmort+=amort;
-    return {month:i+1,installment,interest,tr,amort,bal,cumInstall,cumInterest,cumTR,cumAmort};
+    cumInstall+=installment; cumInterest+=interest; cumTR+=tr; cumAmort+=amort; cumSeguro+=seguro; cumAdmFixo+=admFixoMes;
+    return {month:i+1,installment,interest,tr,amort,seguro,admFixo:admFixoMes,bal,cumInstall,cumInterest,cumTR,cumAmort};
   });
   const last=rows[rows.length-1];
-  return {rows,totals:{installFirst:rows[0].installment,installLast:last.installment,totalInterest:last.cumInterest,totalTR:last.cumTR,totalAmort:principal,totalPaid:last.cumInstall}};
+  return {rows,totals:{installFirst:rows[0].installment,installLast:last.installment,totalInterest:last.cumInterest,totalTR:last.cumTR,totalAmort:principal,totalPaid:last.cumInstall,totalSeguro:cumSeguro,totalAdmFixo:cumAdmFixo}};
 }
 // ─── CALC: PRICE ──────────────────────────────────────────────────────────────
-function calcPrice(principal,rM,trM,months) {
+function calcPrice(principal,rM,trM,months,seguroPctM=0,admFixoMes=0) {
   if(principal<=0||months<=0) return {rows:[],totals:{}};
-  let bal=principal,cumInstall=0,cumInterest=0,cumTR=0,cumAmort=0;
+  let bal=principal,cumInstall=0,cumInterest=0,cumTR=0,cumAmort=0,cumSeguro=0,cumAdmFixo=0;
   const rows=Array.from({length:months},(_,i)=>{
     const remaining=months-i; const tr=bal*trM; bal+=tr;
-    const installment=pmtFn(bal,rM,remaining); const interest=bal*rM;
-    const amort=Math.max(installment-interest,0); bal=Math.max(bal-amort,0);
-    cumInstall+=installment; cumInterest+=interest; cumTR+=tr; cumAmort+=amort;
-    return {month:i+1,installment,interest,tr,amort,bal,cumInstall,cumInterest,cumTR,cumAmort};
+    const installmentBase=pmtFn(bal,rM,remaining); const interest=bal*rM;
+    const seguro=bal*seguroPctM;
+    const amort=Math.max(installmentBase-interest,0); bal=Math.max(bal-amort,0);
+    const installment=installmentBase+seguro+admFixoMes;
+    cumInstall+=installment; cumInterest+=interest; cumTR+=tr; cumAmort+=amort; cumSeguro+=seguro; cumAdmFixo+=admFixoMes;
+    return {month:i+1,installment,interest,tr,amort,seguro,admFixo:admFixoMes,bal,cumInstall,cumInterest,cumTR,cumAmort};
   });
   const last=rows[rows.length-1];
-  return {rows,totals:{installFirst:rows[0].installment,installLast:last.installment,totalInterest:last.cumInterest,totalTR:last.cumTR,totalAmort:principal,totalPaid:last.cumInstall}};
+  return {rows,totals:{installFirst:rows[0].installment,installLast:last.installment,totalInterest:last.cumInterest,totalTR:last.cumTR,totalAmort:principal,totalPaid:last.cumInstall,totalSeguro:cumSeguro,totalAdmFixo:cumAdmFixo}};
 }
 // ─── CALC: SAC COM AMORTIZAÇÃO EXTRAORDINÁRIA ─────────────────────────────────
-function calcSacAmort(principal,rM,trM,months,amortMensal,amortAnual,mesAnual,efeito,periodicidade,anoUnico) {
+function calcSacAmort(principal,rM,trM,months,amortMensal,amortAnual,mesAnual,efeito,periodicidade,anoUnico,seguroPctM=0,admFixoMes=0) {
   if(principal<=0||months<=0) return {rows:[],totals:{}};
   const instOriginais=[];
   if(efeito==="prazo"){
@@ -108,17 +115,23 @@ function calcSacAmort(principal,rM,trM,months,amortMensal,amortAnual,mesAnual,ef
       b2=Math.max(b2-amort,0);
     }
   }
-  let bal=principal,cumInstall=0,cumInterest=0,cumTR=0,cumAmortExtra=0;
+  // `seguroPctM`/`admFixoMes` funcionam igual ao calcSac: seguro sobre o saldo
+  // real (já reduzido pela amortização extra) e taxa fixa por mês ainda em
+  // aberto. Como no efeito "reduz prazo" o empréstimo quita e o loop para
+  // (break abaixo), esses dois "penduricalhos" somem mais cedo — é exatamente
+  // o efeito que reduzir o prazo tem sobre eles, e fica visível nos totais.
+  let bal=principal,cumInstall=0,cumInterest=0,cumTR=0,cumAmortExtra=0,cumSeguro=0,cumAdmFixo=0;
   const rows=[];
   for(let i=0;i<months;i++){
     const m=i+1, rem=months-i;
     if(bal<0.01){
       if(efeito==="prazo") break;
-      rows.push({month:m,installment:0,interest:0,tr:0,amort:0,amortExtra:0,bal:0,cumInstall,cumInterest,cumTR,cumAmortExtra});
+      rows.push({month:m,installment:0,interest:0,tr:0,amort:0,seguro:0,admFixo:0,amortExtra:0,bal:0,cumInstall,cumInterest,cumTR,cumAmortExtra});
       continue;
     }
     const tr=bal*trM; bal+=tr;
     const interest=bal*rM;
+    const seguro=bal*seguroPctM;
     let inst, amort;
     if(efeito==="prazo"){
       inst=instOriginais[i]||0;
@@ -127,8 +140,9 @@ function calcSacAmort(principal,rM,trM,months,amortMensal,amortAnual,mesAnual,ef
       amort=bal/rem;
       inst=amort+interest;
     }
+    inst+=seguro+admFixoMes;
     bal=Math.max(bal-amort,0);
-    cumInstall+=inst; cumInterest+=interest; cumTR+=tr;
+    cumInstall+=inst; cumInterest+=interest; cumTR+=tr; cumSeguro+=seguro; cumAdmFixo+=admFixoMes;
     const mNorm=m%12===0?12:m%12;
     const mesNorm=(mesAnual||12)%12===0?12:(mesAnual||12)%12;
     const anoAtual=Math.ceil(m/12);
@@ -136,16 +150,16 @@ function calcSacAmort(principal,rM,trM,months,amortMensal,amortAnual,mesAnual,ef
     const extra=Math.min((amortMensal||0)+(isAnual?(amortAnual||0):0), bal);
     bal=Math.max(bal-extra,0);
     cumAmortExtra+=extra;
-    rows.push({month:m,installment:inst,interest,tr,amort,amortExtra:extra,bal,cumInstall,cumInterest,cumTR,cumAmortExtra});
+    rows.push({month:m,installment:inst,interest,tr,amort,seguro,admFixo:admFixoMes,amortExtra:extra,bal,cumInstall,cumInterest,cumTR,cumAmortExtra});
     if(efeito==="prazo"&&bal<0.01) break;
   }
   const last=rows[rows.length-1]||{};
   const validRows=rows.filter(r=>r.installment>0.01);
   const prazoEfetivo=efeito==="prazo"?rows.length:months;
-  return {rows,totals:{installFirst:rows[0]?.installment||0,installLast:validRows[validRows.length-1]?.installment||0,totalInterest:last.cumInterest||0,totalTR:last.cumTR||0,totalAmort:principal,totalPaid:(last.cumInstall||0)+(last.cumAmortExtra||0),totalAmortExtra:last.cumAmortExtra||0,prazoEfetivo,mesesEconomizados:efeito==="prazo"?months-rows.length:0}};
+  return {rows,totals:{installFirst:rows[0]?.installment||0,installLast:validRows[validRows.length-1]?.installment||0,totalInterest:last.cumInterest||0,totalTR:last.cumTR||0,totalAmort:principal,totalPaid:(last.cumInstall||0)+(last.cumAmortExtra||0),totalAmortExtra:last.cumAmortExtra||0,totalSeguro:cumSeguro,totalAdmFixo:cumAdmFixo,prazoEfetivo,mesesEconomizados:efeito==="prazo"?months-rows.length:0}};
 }
 // ─── CALC: PRICE COM AMORTIZAÇÃO EXTRAORDINÁRIA ───────────────────────────────
-function calcPriceAmort(principal,rM,trM,months,amortMensal,amortAnual,mesAnual,efeito,periodicidade,anoUnico) {
+function calcPriceAmort(principal,rM,trM,months,amortMensal,amortAnual,mesAnual,efeito,periodicidade,anoUnico,seguroPctM=0,admFixoMes=0) {
   if(principal<=0||months<=0) return {rows:[],totals:{}};
   const instOriginais=[];
   if(efeito==="prazo"){
@@ -159,17 +173,18 @@ function calcPriceAmort(principal,rM,trM,months,amortMensal,amortAnual,mesAnual,
       b2=Math.max(b2-amort,0);
     }
   }
-  let bal=principal,cumInstall=0,cumInterest=0,cumTR=0,cumAmortExtra=0;
+  let bal=principal,cumInstall=0,cumInterest=0,cumTR=0,cumAmortExtra=0,cumSeguro=0,cumAdmFixo=0;
   const rows=[];
   for(let i=0;i<months;i++){
     const m=i+1, rem=months-i;
     if(bal<0.01){
       if(efeito==="prazo") break;
-      rows.push({month:m,installment:0,interest:0,tr:0,amort:0,amortExtra:0,bal:0,cumInstall,cumInterest,cumTR,cumAmortExtra});
+      rows.push({month:m,installment:0,interest:0,tr:0,amort:0,seguro:0,admFixo:0,amortExtra:0,bal:0,cumInstall,cumInterest,cumTR,cumAmortExtra});
       continue;
     }
     const tr=bal*trM; bal+=tr;
     const interest=bal*rM;
+    const seguro=bal*seguroPctM;
     let inst, amort;
     if(efeito==="prazo"){
       inst=instOriginais[i]||0;
@@ -178,8 +193,9 @@ function calcPriceAmort(principal,rM,trM,months,amortMensal,amortAnual,mesAnual,
       inst=pmtFn(bal,rM,rem);
       amort=Math.max(inst-interest,0);
     }
+    inst+=seguro+admFixoMes;
     bal=Math.max(bal-amort,0);
-    cumInstall+=inst; cumInterest+=interest; cumTR+=tr;
+    cumInstall+=inst; cumInterest+=interest; cumTR+=tr; cumSeguro+=seguro; cumAdmFixo+=admFixoMes;
     const mNorm=m%12===0?12:m%12;
     const mesNorm=(mesAnual||12)%12===0?12:(mesAnual||12)%12;
     const anoAtual=Math.ceil(m/12);
@@ -187,16 +203,16 @@ function calcPriceAmort(principal,rM,trM,months,amortMensal,amortAnual,mesAnual,
     const extra=Math.min((amortMensal||0)+(isAnual?(amortAnual||0):0), bal);
     bal=Math.max(bal-extra,0);
     cumAmortExtra+=extra;
-    rows.push({month:m,installment:inst,interest,tr,amort,amortExtra:extra,bal,cumInstall,cumInterest,cumTR,cumAmortExtra});
+    rows.push({month:m,installment:inst,interest,tr,amort,seguro,admFixo:admFixoMes,amortExtra:extra,bal,cumInstall,cumInterest,cumTR,cumAmortExtra});
     if(efeito==="prazo"&&bal<0.01) break;
   }
   const last=rows[rows.length-1]||{};
   const validRows=rows.filter(r=>r.installment>0.01);
   const prazoEfetivo=efeito==="prazo"?rows.length:months;
-  return {rows,totals:{installFirst:rows[0]?.installment||0,installLast:validRows[validRows.length-1]?.installment||0,totalInterest:last.cumInterest||0,totalTR:last.cumTR||0,totalAmort:principal,totalPaid:(last.cumInstall||0)+(last.cumAmortExtra||0),totalAmortExtra:last.cumAmortExtra||0,prazoEfetivo,mesesEconomizados:efeito==="prazo"?months-rows.length:0}};
+  return {rows,totals:{installFirst:rows[0]?.installment||0,installLast:validRows[validRows.length-1]?.installment||0,totalInterest:last.cumInterest||0,totalTR:last.cumTR||0,totalAmort:principal,totalPaid:(last.cumInstall||0)+(last.cumAmortExtra||0),totalAmortExtra:last.cumAmortExtra||0,totalSeguro:cumSeguro,totalAdmFixo:cumAdmFixo,prazoEfetivo,mesesEconomizados:efeito==="prazo"?months-rows.length:0}};
 }
 // ─── CALC: CONSÓRCIO ──────────────────────────────────────────────────────────
-function calcConsorcio(carta,months,adminPct,fundoReservaPct,idxM,cm,lance,promoDescPct=0,promoMeses=0) {
+function calcConsorcio(carta,months,adminPct,fundoReservaPct,idxM,cm,lance,promoDescPct=0,promoMeses=0,seguroPctM=0,adminReajusta=true) {
   if(carta<=0||months<=0) return {rows:[],totals:{},meta:{}};
   const lanceSafe=Math.max(Number(lance)||0,0);
   const fundoCost=carta*fundoReservaPct;
@@ -244,7 +260,20 @@ function calcConsorcio(carta,months,adminPct,fundoReservaPct,idxM,cm,lance,promo
   if(lanceSafe>0&&mesesPos>0){ parcelaPosBase=saldoPos/mesesPos; }
   else if(promoD>0){ const mesesDesdeRecalc=cm-recalcMes; parcelaPosBase=parcelaRecalcBase*(1+idxM)**mesesDesdeRecalc; }
   else { parcelaPosBase=parcelaBase*(1+idxM)**(cm-1); }
-  let idxPre=0,idxPos=0,cumInstall=0;
+  // `seguroPctM` (opcional, default 0) é uma taxa MENSAL direta sobre o saldo
+  // devedor estimado do consórcio — como não há um "saldo devedor" contratual
+  // explícito no consórcio (é rateio de grupo, não dívida individual), aproximamos
+  // linearmente: crédito corrigido daquele mês × meses restantes / meses totais
+  // (pré-contemplação) ou saldo pós-lance decrescendo linearmente até o fim
+  // (pós-contemplação). `adminReajusta` (default true, refletindo a prática mais
+  // comum relatada pela ABAC) faz a taxa de adm. + fundo de reserva crescerem
+  // junto com a correção do crédito em vez de ficarem travadas no valor original
+  // — a diferença entra como um adicional (`adminExtra`/`fundoExtra`) somado à
+  // parcela "base" já calculada acima, então zera o efeito quando o toggle é
+  // desligado (comportamento idêntico ao anterior).
+  const adminFlatM_base=carta*adminPct/months;
+  const fundoFlatM_base=carta*fundoReservaPct/months;
+  let idxPre=0,idxPos=0,cumInstall=0,adminExtraTotal=0,fundoExtraTotal=0,seguroTotal=0;
   const rows=Array.from({length:months},(_,i)=>{
     const m=i+1;
     let installment,parcelaBase_m,idxAdj;
@@ -257,12 +286,23 @@ function calcConsorcio(carta,months,adminPct,fundoReservaPct,idxM,cm,lance,promo
       parcelaBase_m=parcelaPosBase*(1+idxM)**(m-cm); installment=parcelaBase_m;
       idxAdj=Math.max(installment-parcelaBase,0); idxPos+=idxAdj;
     }
+    const creditoCorrigido_m=m<=cm?carta*(1+idxM)**(m-1):cartaTravada*(1+idxM)**(m-cm);
+    const adminReajM=creditoCorrigido_m*adminPct/months;
+    const fundoReajM=creditoCorrigido_m*fundoReservaPct/months;
+    const adminExtra=adminReajusta?Math.max(adminReajM-adminFlatM_base,0):0;
+    const fundoExtra=adminReajusta?Math.max(fundoReajM-fundoFlatM_base,0):0;
+    const saldoDevedor=m<=cm
+      ?creditoCorrigido_m*(months-m+1)/months
+      :(mesesPos>0?saldoPos*(1+idxM)**(m-cm)*(months-m+1)/mesesPos:0);
+    const seguro=Math.max(saldoDevedor,0)*seguroPctM;
+    installment+=adminExtra+fundoExtra+seguro;
+    adminExtraTotal+=adminExtra; fundoExtraTotal+=fundoExtra; seguroTotal+=seguro;
     if(m===cm) cumInstall+=lanceEfetivo;
     cumInstall+=installment;
-    return {month:m,installment,installmentBase:parcelaBase_m,idxAdj,cumInstall,isPos:m>cm};
+    return {month:m,installment,installmentBase:parcelaBase_m,idxAdj,adminExtra,fundoExtra,seguro,saldoDevedor,cumInstall,isPos:m>cm};
   });
   const last=rows[rows.length-1];
-  return {rows,totals:{installFirst:rows[0]?.installment||0,installLast:last?.installment||0,totalAdm:adminCost,totalFundo:fundoCost,totalIdxPre:idxPre,totalIdxPos:idxPos,totalPaid:last?.cumInstall||0,totalAmort:cartaTravada,cartaTravada,lanceEfetivo,saldoPos},meta:{cartaTravada,lanceEfetivo,adminCost,fundoCost,idxPre,idxPos,cm,promoDescPct:promoD,promoMeses:promoM}};
+  return {rows,totals:{installFirst:rows[0]?.installment||0,installLast:last?.installment||0,totalAdm:adminCost,totalFundo:fundoCost,totalAdmReajuste:adminExtraTotal,totalFundoReajuste:fundoExtraTotal,totalSeguro:seguroTotal,totalIdxPre:idxPre,totalIdxPos:idxPos,totalPaid:last?.cumInstall||0,totalAmort:cartaTravada,cartaTravada,lanceEfetivo,saldoPos},meta:{cartaTravada,lanceEfetivo,adminCost,fundoCost,idxPre,idxPos,cm,promoDescPct:promoD,promoMeses:promoM}};
 }
 // ─── CALC: CAPITAL INVESTIDO (custo de oportunidade / alavancagem) ────────────
 // Simula o capital que NÃO foi usado como entrada/lance sendo investido a uma
@@ -525,6 +565,7 @@ function HistoricoTabela({sac,price,cons,cmSafe,carta,admin,fundo,prazoCons,sacA
                     <th style={{...thS,color:C.cons}}>Fundo comum</th>
                     <th style={{...thS,color:C.cons}}>Taxa de adm</th>
                     <th style={{...thS,color:C.cons}}>Fundo reserva</th>
+                    <th style={{...thS,color:C.cons}}>Seguro</th>
                     <th style={thS}>Indexador</th>
                     <th style={{...thS,color:C.cons}}>Parcela</th>
                   </tr>
@@ -534,14 +575,15 @@ function HistoricoTabela({sac,price,cons,cmSafe,carta,admin,fundo,prazoCons,sacA
                     const grossBase=carta*(1+admin/100+fundo/100)/prazoCons;
                     const fatorM=grossBase>0?r.installmentBase/grossBase:1;
                     const fundoComum=(carta/prazoCons)*fatorM;
-                    const taxaAdm=(carta*admin/100/prazoCons)*fatorM;
-                    const fundoRes=(carta*fundo/100/prazoCons)*fatorM;
+                    const taxaAdm=(carta*admin/100/prazoCons)*fatorM+(r.adminExtra||0);
+                    const fundoRes=(carta*fundo/100/prazoCons)*fatorM+(r.fundoExtra||0);
                     return (
                       <tr key={r.month} style={{background:i%2===0?C.panel:C.panel2}}>
                         <td style={{...tdL,color:r.month>=cmSafe?C.accent:C.muted}}>{r.month}{r.month===cmSafe?" ★":""}</td>
                         <td style={tdC(true,C.cons)}>{brl(fundoComum)}</td>
                         <td style={tdC()}>{brl(taxaAdm)}</td>
                         <td style={tdC()}>{brl(fundoRes)}</td>
+                        <td style={tdC()}>{r.seguro?brl(r.seguro):"—"}</td>
                         <td style={tdC()}>{brl(r.idxAdj)}</td>
                         <td style={tdC(true)}>{brl(r.installment)}</td>
                       </tr>
@@ -661,10 +703,11 @@ function CustosDetalhados({st,pt,ct,sacTotal,priceTotal,consTotal,sacVP,priceVP,
     return <span style={{fontWeight:isMin?700:400,color:isMin?color:C.text,fontSize:12}}>{brl(v)}</span>;
   };
   const rows=[
-    {label:"Juros + seguros + taxas (CET)",sub:"Custo Efetivo Total contratado",sac:st.totalInterest,price:pt.totalInterest,cons:null,hlMin:true},
+    {label:"Juros",sub:"Custo financeiro do financiamento",sac:st.totalInterest,price:pt.totalInterest,cons:null,hlMin:true},
     {label:"TR paga",sac:st.totalTR,price:pt.totalTR,cons:null,hlMin:true},
-    {label:"Taxa de administração",sac:null,price:null,cons:ct.totalAdm,hlMin:false},
-    {label:"Fundo de reserva",sub:"Pode ser devolvido ao final",sac:null,price:null,cons:ct.totalFundo,hlMin:false},
+    {label:"Seguro",sub:"% a.m. sobre saldo devedor",sac:st.totalSeguro||null,price:pt.totalSeguro||null,cons:ct.totalSeguro||null,hlMin:false},
+    {label:"Taxa de administração",sub:"Financiamento: fixa em R$/mês · Consórcio: inclui reajuste se ativado",sac:st.totalAdmFixo||null,price:pt.totalAdmFixo||null,cons:ct.totalAdm+(ct.totalAdmReajuste||0),hlMin:false},
+    {label:"Fundo de reserva",sub:"Pode ser devolvido ao final · inclui reajuste se ativado",sac:null,price:null,cons:ct.totalFundo+(ct.totalFundoReajuste||0),hlMin:false},
     {label:"Indexador pré-contemplação",sac:null,price:null,cons:ct.totalIdxPre,hlMin:false},
     {label:"Indexador pós-contemplação",sac:null,price:null,cons:ct.totalIdxPos,hlMin:false},
     {label:"Aluguel durante espera",sub:aluguelTotal>0?`${cmSafe} meses`:"Não informado",sac:null,price:null,cons:aluguelTotal>0?aluguelTotal:null,hlMin:false},
@@ -883,6 +926,7 @@ function HistoricoTabelaVeiculo({fin,cons,cmSafe,carta,admin,fundo,prazoCons}) {
                     <th style={{...thS,color:C.cons}}>Fundo comum</th>
                     <th style={{...thS,color:C.cons}}>Taxa de adm</th>
                     <th style={{...thS,color:C.cons}}>Fundo reserva</th>
+                    <th style={{...thS,color:C.cons}}>Seguro</th>
                     <th style={thS}>Índice</th>
                     <th style={{...thS,color:C.cons}}>Parcela</th>
                   </tr>
@@ -892,14 +936,15 @@ function HistoricoTabelaVeiculo({fin,cons,cmSafe,carta,admin,fundo,prazoCons}) {
                     const grossBase=carta*(1+admin/100+fundo/100)/prazoCons;
                     const fatorM=grossBase>0?r.installmentBase/grossBase:1;
                     const fundoComum=(carta/prazoCons)*fatorM;
-                    const taxaAdm=(carta*admin/100/prazoCons)*fatorM;
-                    const fundoRes=(carta*fundo/100/prazoCons)*fatorM;
+                    const taxaAdm=(carta*admin/100/prazoCons)*fatorM+(r.adminExtra||0);
+                    const fundoRes=(carta*fundo/100/prazoCons)*fatorM+(r.fundoExtra||0);
                     return (
                       <tr key={r.month} style={{background:i%2===0?C.panel:C.panel2}}>
                         <td style={{...tdL,color:r.month>=cmSafe?C.accent:C.muted}}>{r.month}{r.month===cmSafe?" ★":""}</td>
                         <td style={tdC(true,C.cons)}>{brl(fundoComum)}</td>
                         <td style={tdC()}>{brl(taxaAdm)}</td>
                         <td style={tdC()}>{brl(fundoRes)}</td>
+                        <td style={tdC()}>{r.seguro?brl(r.seguro):"—"}</td>
                         <td style={tdC()}>{brl(r.idxAdj)}</td>
                         <td style={tdC(true)}>{brl(r.installment)}</td>
                       </tr>
@@ -1013,10 +1058,11 @@ function CustosDetalhadosVeiculo({ft,vct,finTotal,consTotal,finVP,consVP,idxAnua
     return <span style={{fontWeight:isMin?700:400,color:isMin?color:C.text,fontSize:12}}>{brl(v)}</span>;
   };
   const rows=[
-    {label:"Juros + seguros + taxas (CET)",sub:"Custo Efetivo Total contratado",fin:ft.totalInterest,cons:null,hlMin:false},
+    {label:"Juros",sub:"Custo financeiro do financiamento",fin:ft.totalInterest,cons:null,hlMin:false},
     {label:"IOF financiado",sub:iof>0?"Informado manualmente, somado ao valor financiado":"Não informado",fin:iof>0?iof:null,cons:null,hlMin:false},
-    {label:"Taxa de administração",fin:null,cons:vct.totalAdm,hlMin:false},
-    {label:"Fundo de reserva",sub:"Pode ser devolvido ao final",fin:null,cons:vct.totalFundo,hlMin:false},
+    {label:"Seguro",sub:"% a.m. sobre saldo devedor",fin:ft.totalSeguro||null,cons:vct.totalSeguro||null,hlMin:false},
+    {label:"Taxa de administração",sub:"Financiamento: fixa em R$/mês · Consórcio: inclui reajuste se ativado",fin:ft.totalAdmFixo||null,cons:vct.totalAdm+(vct.totalAdmReajuste||0),hlMin:false},
+    {label:"Fundo de reserva",sub:"Pode ser devolvido ao final · inclui reajuste se ativado",fin:null,cons:vct.totalFundo+(vct.totalFundoReajuste||0),hlMin:false},
     {label:"Indexador pré-contemplação",fin:null,cons:vct.totalIdxPre,hlMin:false},
     {label:"Indexador pós-contemplação",fin:null,cons:vct.totalIdxPos,hlMin:false},
     {label:"Entrada / lance",fin:entrada,cons:vct.lanceEfetivo||0,hlMin:true},
@@ -1319,15 +1365,24 @@ function FluxoCapitalDetalhado({itens,cmSafe,horizonte}) {
 // ─── APP ──────────────────────────────────────────────────────────────────────
 export default function App() {
   const [modo,setModo]=useState("imovel");
+  // Reajuste da taxa de administração/fundo de reserva pelo mesmo índice de
+  // correção do crédito — compartilhado entre Imóvel, Veículo e Alavancagem,
+  // já que os três usam a mesma calcConsorcio. Default ligado (prática mais
+  // comum relatada pela ABAC); dá pra desligar e voltar ao cálculo antigo
+  // (taxa fixa sobre o valor original da carta).
+  const [admReajusta,setAdmReajusta]=useState(true);
   const [imovel,setImovel]=useState(500000);
   const [entrada,setEntrada]=useState(100000);
   const [fgts,setFgts]=useState(0);
   const [juros,setJuros]=useState(11);
   const [trAnual,setTrAnual]=useState(1);
+  const [segFin,setSegFin]=useState(0);
+  const [admFinFixo,setAdmFinFixo]=useState(0);
   const [prazoFin,setPrazoFin]=useState(200);
   const [carta,setCarta]=useState(500000);
   const [admin,setAdmin]=useState(20);
   const [fundo,setFundo]=useState(2);
+  const [segCons,setSegCons]=useState(0);
   const [idxAnual,setIdxAnual]=useState(6);
   const [prazoCons,setPrazoCons]=useState(200);
   const [cmMes,setCmMes]=useState(80);
@@ -1346,11 +1401,14 @@ export default function App() {
   const [veicValor,setVeicValor]=useState(80000);
   const [veicEntrada,setVeicEntrada]=useState(20000);
   const [veicCET,setVeicCET]=useState(22);
+  const [veicSeg,setVeicSeg]=useState(0);
+  const [veicAdmFixo,setVeicAdmFixo]=useState(0);
   const [veicIOF,setVeicIOF]=useState(0);
   const [veicPrazo,setVeicPrazo]=useState(48);
   const [veicCarta,setVeicCarta]=useState(80000);
   const [veicAdmin,setVeicAdmin]=useState(18);
   const [veicFundo,setVeicFundo]=useState(2);
+  const [veicSegCons,setVeicSegCons]=useState(0);
   const [veicIdx,setVeicIdx]=useState(6);
   const [veicPrazoCons,setVeicPrazoCons]=useState(70);
   const [veicCmMes,setVeicCmMes]=useState(30);
@@ -1372,11 +1430,11 @@ export default function App() {
   const idxM=useMemo(()=>annualToMonthly(idxAnual),[idxAnual]);
   const cmSafe=Math.min(Math.max(Number(cmMes)||1,1),Math.max(Number(prazoCons)||1,1));
   const principal=Math.max(imovel-entrada-fgts,0);
-  const sac=useMemo(()=>calcSac(principal,rM,trM,prazoFin),[principal,rM,trM,prazoFin]);
-  const price=useMemo(()=>calcPrice(principal,rM,trM,prazoFin),[principal,rM,trM,prazoFin]);
-  const cons=useMemo(()=>calcConsorcio(carta,prazoCons,admin/100,fundo/100,idxM,cmSafe,lance,promoDesc/100,promoMeses),[carta,prazoCons,admin,fundo,idxM,cmSafe,lance,promoDesc,promoMeses]);
-  const sacAmort=useMemo(()=>amortAtiva?calcSacAmort(principal,rM,trM,prazoFin,amortMensal,amortAnual,amortMesAnual,amortEfeito,amortPeriodicidade,amortAno):null,[principal,rM,trM,prazoFin,amortMensal,amortAnual,amortMesAnual,amortEfeito,amortAtiva,amortPeriodicidade,amortAno]);
-  const priceAmort=useMemo(()=>amortAtiva?calcPriceAmort(principal,rM,trM,prazoFin,amortMensal,amortAnual,amortMesAnual,amortEfeito,amortPeriodicidade,amortAno):null,[principal,rM,trM,prazoFin,amortMensal,amortAnual,amortMesAnual,amortEfeito,amortAtiva,amortPeriodicidade,amortAno]);
+  const sac=useMemo(()=>calcSac(principal,rM,trM,prazoFin,segFin/100,admFinFixo),[principal,rM,trM,prazoFin,segFin,admFinFixo]);
+  const price=useMemo(()=>calcPrice(principal,rM,trM,prazoFin,segFin/100,admFinFixo),[principal,rM,trM,prazoFin,segFin,admFinFixo]);
+  const cons=useMemo(()=>calcConsorcio(carta,prazoCons,admin/100,fundo/100,idxM,cmSafe,lance,promoDesc/100,promoMeses,segCons/100,admReajusta),[carta,prazoCons,admin,fundo,idxM,cmSafe,lance,promoDesc,promoMeses,segCons,admReajusta]);
+  const sacAmort=useMemo(()=>amortAtiva?calcSacAmort(principal,rM,trM,prazoFin,amortMensal,amortAnual,amortMesAnual,amortEfeito,amortPeriodicidade,amortAno,segFin/100,admFinFixo):null,[principal,rM,trM,prazoFin,amortMensal,amortAnual,amortMesAnual,amortEfeito,amortAtiva,amortPeriodicidade,amortAno,segFin,admFinFixo]);
+  const priceAmort=useMemo(()=>amortAtiva?calcPriceAmort(principal,rM,trM,prazoFin,amortMensal,amortAnual,amortMesAnual,amortEfeito,amortPeriodicidade,amortAno,segFin/100,admFinFixo):null,[principal,rM,trM,prazoFin,amortMensal,amortAnual,amortMesAnual,amortEfeito,amortAtiva,amortPeriodicidade,amortAno,segFin,admFinFixo]);
   const st=(amortAtiva&&sacAmort)?sacAmort.totals:sac.totals;
   const pt=(amortAtiva&&priceAmort)?priceAmort.totals:price.totals;
   const ct=cons.totals;
@@ -1392,8 +1450,8 @@ export default function App() {
   const veicCmSafe=Math.min(Math.max(Number(veicCmMes)||1,1),Math.max(Number(veicPrazoCons)||1,1));
   const veicIofSafe=Math.max(Number(veicIOF)||0,0);
   const veicPrincipal=Math.max(veicValor-veicEntrada,0)+veicIofSafe;
-  const veicFin=useMemo(()=>calcPrice(veicPrincipal,veicRM,0,veicPrazo),[veicPrincipal,veicRM,veicPrazo]);
-  const veicCons=useMemo(()=>calcConsorcio(veicCarta,veicPrazoCons,veicAdmin/100,veicFundo/100,veicIdxM,veicCmSafe,veicLance,0,0),[veicCarta,veicPrazoCons,veicAdmin,veicFundo,veicIdxM,veicCmSafe,veicLance]);
+  const veicFin=useMemo(()=>calcPrice(veicPrincipal,veicRM,0,veicPrazo,veicSeg/100,veicAdmFixo),[veicPrincipal,veicRM,veicPrazo,veicSeg,veicAdmFixo]);
+  const veicCons=useMemo(()=>calcConsorcio(veicCarta,veicPrazoCons,veicAdmin/100,veicFundo/100,veicIdxM,veicCmSafe,veicLance,0,0,veicSegCons/100,admReajusta),[veicCarta,veicPrazoCons,veicAdmin,veicFundo,veicIdxM,veicCmSafe,veicLance,veicSegCons,admReajusta]);
   const ft=veicFin.totals,vct=veicCons.totals;
   const veicFinTotal=(ft.totalPaid||0)+veicEntrada;
   const veicConsTotal=vct.totalPaid||0;
@@ -1409,7 +1467,7 @@ export default function App() {
   // comparação já existe nos modos Imóvel e Veículo.
   const alavIdxM=useMemo(()=>annualToMonthly(alavIdx),[alavIdx]);
   const alavCmSafe=Math.min(Math.max(Number(alavCmMes)||1,1),Math.max(Number(alavPrazoCons)||1,1));
-  const alavCons=useMemo(()=>calcConsorcio(alavCarta,alavPrazoCons,alavAdmin/100,alavFundo/100,alavIdxM,alavCmSafe,alavLance,0,0),[alavCarta,alavPrazoCons,alavAdmin,alavFundo,alavIdxM,alavCmSafe,alavLance]);
+  const alavCons=useMemo(()=>calcConsorcio(alavCarta,alavPrazoCons,alavAdmin/100,alavFundo/100,alavIdxM,alavCmSafe,alavLance,0,0,0,admReajusta),[alavCarta,alavPrazoCons,alavAdmin,alavFundo,alavIdxM,alavCmSafe,alavLance,admReajusta]);
   const act=alavCons.totals;
   const alavRInvestM=annualToMonthly(alavRendCapital);
   // horizonte de comparação: o prazo inteiro do consórcio — o capital de quem
@@ -1449,14 +1507,14 @@ export default function App() {
     mesesSet.add(alavCmSafe); // garante que o mês configurado no painel aparece no gráfico
     const meses=[...mesesSet].sort((a,b)=>a-b);
     return meses.map(cm=>{
-      const consCm=calcConsorcio(alavCarta,prazoSafe,alavAdmin/100,alavFundo/100,alavIdxM,cm,alavLance,0,0);
+      const consCm=calcConsorcio(alavCarta,prazoSafe,alavAdmin/100,alavFundo/100,alavIdxM,cm,alavLance,0,0,0,admReajusta);
       const tCm=consCm.totals;
       const capCm=calcCapitalAlavancado(alavCapitalTotal,0,alavRInvestM,consCm.rows.map(r=>r.installment),alavHorizonte,tCm.lanceEfetivo||0,cm);
       const valorAtivoCm=Math.max(tCm.cartaTravada||0,0); // saldo devedor final = 0, autoamortizado
       const patrimonioCm=valorAtivoCm+capCm.final-capCm.aporteRendaTotal;
       return {mes:cm,Consórcio:patrimonioCm};
     });
-  },[alavCarta,alavPrazoCons,alavAdmin,alavFundo,alavIdxM,alavLance,alavCapitalTotal,alavRInvestM,alavHorizonte,alavCmSafe]);
+  },[alavCarta,alavPrazoCons,alavAdmin,alavFundo,alavIdxM,alavLance,alavCapitalTotal,alavRInvestM,alavHorizonte,alavCmSafe,admReajusta]);
   const alavPatAplic=itensAlav[0].patrimonioTotal;
   const sacTotal=(st.totalPaid||0)+entrada+fgts;
   const priceTotal=(pt.totalPaid||0)+entrada+fgts;
@@ -1511,11 +1569,11 @@ export default function App() {
   })),[sac.rows,price.rows,sacAmort,priceAmort,maxM]);
   const cenariosMeses=[40,80,120,160].filter(m=>m<=prazoCons);
   const cenarios=useMemo(()=>cenariosMeses.map(cm=>{
-    const c=calcConsorcio(carta,prazoCons,admin/100,fundo/100,idxM,cm,lance,promoDesc/100,promoMeses);
+    const c=calcConsorcio(carta,prazoCons,admin/100,fundo/100,idxM,cm,lance,promoDesc/100,promoMeses,segCons/100,admReajusta);
     const ct2=c.totals;
     const desembolsoPreCm=c.rows.slice(0,cm).reduce((a,r)=>a+r.installment,0)+(ct2.lanceEfetivo||0);
     return {cm,cartaTravada:ct2.cartaTravada,desembolsoPre:desembolsoPreCm,desembolsoPos:Math.max((ct2.totalPaid||0)-desembolsoPreCm+(ct2.lanceEfetivo||0),0),totalPaid:ct2.totalPaid};
-  }),[carta,prazoCons,admin,fundo,idxM,lance,promoDesc,promoMeses]);
+  }),[carta,prazoCons,admin,fundo,idxM,lance,promoDesc,promoMeses,segCons,admReajusta]);
   const totaisList=[{label:"SAC",value:sacTotal,color:C.sac},{label:"Price",value:priceTotal,color:C.price},{label:"Consórcio",value:consTotal,color:C.cons}];
   const minT=Math.min(...totaisList.map(t=>t.value));
   // ── veículo: gráficos e cenários ───────────────────────────────────────────
@@ -1535,11 +1593,11 @@ export default function App() {
   })),[veicFin.rows,veicMaxM]);
   const cenariosMesesVeic=[12,24,36,48,60].filter(m=>m<=veicPrazoCons);
   const cenariosVeic=useMemo(()=>cenariosMesesVeic.map(cm=>{
-    const c=calcConsorcio(veicCarta,veicPrazoCons,veicAdmin/100,veicFundo/100,veicIdxM,cm,veicLance,0,0);
+    const c=calcConsorcio(veicCarta,veicPrazoCons,veicAdmin/100,veicFundo/100,veicIdxM,cm,veicLance,0,0,veicSegCons/100,admReajusta);
     const ct2=c.totals;
     const desembolsoPreCm=c.rows.slice(0,cm).reduce((a,r)=>a+r.installment,0)+(ct2.lanceEfetivo||0);
     return {cm,cartaTravada:ct2.cartaTravada,desembolsoPre:desembolsoPreCm,desembolsoPos:Math.max((ct2.totalPaid||0)-desembolsoPreCm+(ct2.lanceEfetivo||0),0),totalPaid:ct2.totalPaid};
-  }),[veicCarta,veicPrazoCons,veicAdmin,veicFundo,veicIdxM,veicLance]);
+  }),[veicCarta,veicPrazoCons,veicAdmin,veicFundo,veicIdxM,veicLance,veicSegCons,admReajusta]);
   const totaisListVeic=[{label:"Financiamento",value:veicFinTotal,color:C.sac},{label:"Consórcio",value:veicConsTotal,color:C.cons}];
   const minTVeic=Math.min(...totaisListVeic.map(t=>t.value));
   return (
@@ -1570,8 +1628,10 @@ export default function App() {
             <InputMoney label="Valor do imóvel"  value={imovel}  onChange={setImovel}/>
             <InputMoney label="Entrada"          value={entrada} onChange={setEntrada}/>
             <InputMoney label="FGTS"             value={fgts}    onChange={setFgts} hint={`Financia ${brl(principal)}`}/>
-            <InputPct   label="CET anual"        value={juros}   onChange={setJuros} hint="Inclui juros, seguros e taxas"/>
+            <InputPct   label="Juros anual"      value={juros}   onChange={setJuros} hint="Sem seguro/taxa — agora informados à parte abaixo"/>
             <InputPct   label="TR anual"         value={trAnual} onChange={setTrAnual}/>
+            <InputPct   label="Seguro (% a.m. s/ saldo)" value={segFin} onChange={setSegFin} hint="Direto ao mês, não anualizado — ex: 0,035"/>
+            <InputMoney label="Taxa de administração (R$/mês)" value={admFinFixo} onChange={setAdmFinFixo} hint="Valor fixo somado a cada parcela"/>
             <InputInt   label="Prazo (meses)"    value={prazoFin} onChange={setPrazoFin}/>
             {/* AMORTIZAÇÕES */}
             <div style={{borderTop:`1px solid ${C.border}`,paddingTop:12,marginTop:2}}>
@@ -1617,6 +1677,18 @@ export default function App() {
             <InputMoney label="Carta de crédito"         value={carta}     onChange={setCarta}/>
             <InputPct   label="Taxa de administração"    value={admin}     onChange={setAdmin}/>
             <InputPct   label="Fundo de reserva"         value={fundo}     onChange={setFundo} hint="Típico 2%–4%"/>
+            <InputPct   label="Seguro (% a.m. s/ saldo)" value={segCons}   onChange={setSegCons} hint="Direto ao mês, não anualizado — opcional"/>
+            <div>
+              <div style={{fontSize:11,fontWeight:600,color:C.muted,marginBottom:4,textTransform:"uppercase",letterSpacing:"0.07em"}}>Adm. + fundo reajustam com a carta?</div>
+              <div style={{display:"flex",gap:8}}>
+                {[{v:true,label:"Reajustam (recomendado)"},{v:false,label:"Fixos no valor original"}].map(op=>(
+                  <button key={String(op.v)} onClick={()=>setAdmReajusta(op.v)} style={{flex:1,padding:"7px 8px",borderRadius:6,border:`1px solid ${admReajusta===op.v?C.cons:C.border}`,background:admReajusta===op.v?"rgba(74,222,128,0.1)":"transparent",color:admReajusta===op.v?C.cons:C.muted,fontFamily:F.body,fontSize:11,fontWeight:600,transition:"all 0.15s"}}>
+                    {op.label}
+                  </button>
+                ))}
+              </div>
+              <div style={{fontSize:11,color:C.muted,marginTop:4,lineHeight:1.4}}>Vale para Imóvel, Veículo e Alavancagem (opção única, compartilhada)</div>
+            </div>
             <InputPct   label="Indexador anual"          value={idxAnual}  onChange={setIdxAnual}/>
             <InputInt   label="Prazo (meses)"            value={prazoCons} onChange={setPrazoCons}/>
             <InputInt   label="Mês de contemplação"      value={cmMes}     onChange={setCmMes} hint="Estimativa — sem garantia de data"/>
@@ -1744,13 +1816,27 @@ export default function App() {
             <InputMoney label="Valor do veículo"  value={veicValor}  onChange={setVeicValor}/>
             <InputMoney label="Entrada"           value={veicEntrada} onChange={setVeicEntrada}/>
             <InputMoney label="IOF financiado"    value={veicIOF}    onChange={setVeicIOF} hint="Informe o valor do IOF a ser somado ao financiamento"/>
-            <InputPct   label="CET anual"         value={veicCET}    onChange={setVeicCET} hint="Inclui juros, seguros e taxas — sem TR, não usa SAC"/>
+            <InputPct   label="Juros anual"       value={veicCET}    onChange={setVeicCET} hint="Sem seguro/taxa — informados à parte abaixo — sem TR, não usa SAC"/>
+            <InputPct   label="Seguro (% a.m. s/ saldo)" value={veicSeg} onChange={setVeicSeg} hint="Direto ao mês, não anualizado — opcional"/>
+            <InputMoney label="Taxa de administração (R$/mês)" value={veicAdmFixo} onChange={setVeicAdmFixo} hint="Valor fixo somado a cada parcela"/>
             <InputInt   label="Prazo (meses)"     value={veicPrazo}  onChange={setVeicPrazo} hint={`Financia ${brl(veicPrincipal)} (valor + IOF − entrada)`}/>
           </InputPanel>
           <InputPanel accentColor={C.cons} label="consórcio de veículo">
             <InputMoney label="Carta de crédito"         value={veicCarta}     onChange={setVeicCarta}/>
             <InputPct   label="Taxa de administração"    value={veicAdmin}     onChange={setVeicAdmin}/>
             <InputPct   label="Fundo de reserva"         value={veicFundo}     onChange={setVeicFundo} hint="Típico 2%–4%"/>
+            <InputPct   label="Seguro (% a.m. s/ saldo)" value={veicSegCons}   onChange={setVeicSegCons} hint="Direto ao mês, não anualizado — opcional"/>
+            <div>
+              <div style={{fontSize:11,fontWeight:600,color:C.muted,marginBottom:4,textTransform:"uppercase",letterSpacing:"0.07em"}}>Adm. + fundo reajustam com a carta?</div>
+              <div style={{display:"flex",gap:8}}>
+                {[{v:true,label:"Reajustam (recomendado)"},{v:false,label:"Fixos no valor original"}].map(op=>(
+                  <button key={String(op.v)} onClick={()=>setAdmReajusta(op.v)} style={{flex:1,padding:"7px 8px",borderRadius:6,border:`1px solid ${admReajusta===op.v?C.cons:C.border}`,background:admReajusta===op.v?"rgba(74,222,128,0.1)":"transparent",color:admReajusta===op.v?C.cons:C.muted,fontFamily:F.body,fontSize:11,fontWeight:600,transition:"all 0.15s"}}>
+                    {op.label}
+                  </button>
+                ))}
+              </div>
+              <div style={{fontSize:11,color:C.muted,marginTop:4,lineHeight:1.4}}>Opção única, compartilhada com Imóvel e Alavancagem</div>
+            </div>
             <InputPct   label="Variação anual (índice)"  value={veicIdx}       onChange={setVeicIdx} hint="Ex: variação da Tabela FIPE do veículo"/>
             <InputInt   label="Prazo (meses)"            value={veicPrazoCons} onChange={setVeicPrazoCons}/>
             <InputInt   label="Mês de contemplação"      value={veicCmMes}     onChange={setVeicCmMes} hint="Estimativa — sem garantia de data"/>
